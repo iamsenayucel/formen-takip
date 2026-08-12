@@ -24,7 +24,7 @@ services:
     environment:
       DATABASE_URL: postgresql+psycopg://${POSTGRES_USER:-formen}:${POSTGRES_PASSWORD:-formen}@postgres:5432/${POSTGRES_DB:-formen_takip}
       JWT_SECRET_KEY: ${JWT_SECRET_KEY:-change-me-in-production}
-      CORS_ORIGINS: '["http://localhost:5173","http://localhost:8080"]'
+      CORS_ORIGINS: '["http://localhost:5173","http://localhost:8099"]'
       ENVIRONMENT: production
       DEBUG: "false"
       LLM_ENABLED: ${LLM_ENABLED:-false}
@@ -43,7 +43,7 @@ services:
     depends_on:
       - backend
     ports:
-      - "8080:80"
+      - "8099:80"
 
 volumes:
   formen_pg_data:
