@@ -6,24 +6,22 @@ import { useCreateContributionWork, useFilterOptions, useUpdateContributionWork 
 import type {
   ContributionCurrency, ContributionGainInput, ContributionTimeUnit, ContributionWorkCreatePayload,
   ContributionWorkItem, ContributionWorkType, FinancialGainStatus, GainPeriod, ImpactLevel,
-  OtherGainType, RepeatPeriod, VerifyingDepartment,
+  OtherGainType, RepeatPeriod,
 } from "../api/types";
 import { computeChange, computeMonthlyTotal, computeTimeSaving, durationToMinutes, formatMinutes } from "../lib/contributionCalc";
-import { IMPACT_LEVEL_LABELS, WORK_TYPE_LABELS } from "../lib/contributionTheme";
+import { CREATABLE_WORK_TYPES, IMPACT_LEVEL_LABELS, WORK_TYPE_LABELS } from "../lib/contributionTheme";
 import { fieldClass, fieldStyle, labelClass, labelStyle } from "../lib/formStyles";
 import { ForemanMultiSelect, type SelectedForeman } from "./ForemanMultiSelect";
+import { MultiSelect } from "./FilterBar";
+import { useModalA11y } from "../hooks/useModalA11y";
 
-const WORK_TYPE_OPTIONS = Object.entries(WORK_TYPE_LABELS) as [ContributionWorkType, string][];
+const WORK_TYPE_OPTIONS = CREATABLE_WORK_TYPES.map((t) => [t, WORK_TYPE_LABELS[t]] as [ContributionWorkType, string]);
 const IMPACT_OPTIONS = Object.entries(IMPACT_LEVEL_LABELS) as [ImpactLevel, string][];
 
 const FINANCIAL_STATUS_LABELS: Record<FinancialGainStatus, string> = {
   yes: "Evet", no: "Hayır", not_calculated: "Henüz hesaplanmadı",
 };
 const GAIN_PERIOD_LABELS: Record<GainPeriod, string> = { one_time: "Tek seferlik", monthly: "Aylık", yearly: "Yıllık" };
-const DEPARTMENT_LABELS: Record<VerifyingDepartment, string> = {
-  finance: "Finans", production: "Üretim", maintenance: "Bakım", quality: "Kalite",
-  safety: "İş Güvenliği", energy: "Enerji", hr: "İnsan Kaynakları", other: "Diğer",
-};
 const TIME_UNIT_LABELS: Record<ContributionTimeUnit, string> = { second: "Saniye", minute: "Dakika", hour: "Saat" };
 const REPEAT_PERIOD_LABELS: Record<RepeatPeriod, string> = { daily: "Günlük", weekly: "Haftalık", monthly: "Aylık" };
 const GAIN_TYPE_LABELS: Record<OtherGainType, string> = {
@@ -38,7 +36,7 @@ function Section({ title, subtitle, children, defaultOpen = true, hasError }: {
 }) {
   const [open, setOpen] = useState(defaultOpen);
   return (
-    <div className="rounded-lg" style={{ border: `1px solid ${hasError ? "#b91c1c" : "var(--border)"}` }}>
+    <div className="rounded-lg" style={{ border: `1px solid ${hasError ? "var(--status-negative)" : "var(--border)"}` }}>
       <button
         type="button"
         onClick={() => setOpen((o) => !o)}
@@ -47,7 +45,7 @@ function Section({ title, subtitle, children, defaultOpen = true, hasError }: {
         <div className="text-left">
           <div className="flex items-center gap-2 text-[13px] font-semibold" style={{ color: "var(--text-primary)" }}>
             {title}
-            {hasError && <TriangleAlert size={13} strokeWidth={2.5} color="#b91c1c" />}
+            {hasError && <TriangleAlert size={13} strokeWidth={2.5} color="var(--status-negative)" />}
           </div>
           {subtitle && <div className="mt-0.5 text-xs" style={{ color: "var(--text-muted)" }}>{subtitle}</div>}
         </div>
@@ -60,7 +58,7 @@ function Section({ title, subtitle, children, defaultOpen = true, hasError }: {
 
 function FieldError({ message }: { message?: string }) {
   if (!message) return null;
-  return <p className="text-xs font-medium" style={{ color: "#b91c1c" }}>{message}</p>;
+  return <p className="text-xs font-medium" style={{ color: "var(--status-negative)" }}>{message}</p>;
 }
 
 interface Props {
@@ -77,50 +75,46 @@ export function ContributionWorkForm({ existing, onClose }: Props) {
   const updateMutation = useUpdateContributionWork();
 
   const [title, setTitle] = useState(existing?.title ?? "");
-  const [workType, setWorkType] = useState<ContributionWorkType | "">(existing?.work_type ?? "");
-  const [workTypeOtherNote, setWorkTypeOtherNote] = useState(existing?.work_type_other_note ?? "");
+  const [workType, setWorkType] = useState<ContributionWorkType | "">(existing?.workType ?? "");
+  const [workTypeOtherNote, setWorkTypeOtherNote] = useState(existing?.workTypeOtherNote ?? "");
   const [foremen, setForemen] = useState<SelectedForeman[]>(existing?.foremen.map((f) => ({ id: f.id, name: f.name })) ?? []);
-  const [factoryId, setFactoryId] = useState(existing?.plant?.factory_id ?? "");
-  const [plantId, setPlantId] = useState(existing?.plant?.id ?? "");
-  const [dateMode, setDateMode] = useState<"single" | "range">(existing?.work_date_end ? "range" : "single");
-  const [workDate, setWorkDate] = useState(existing?.work_date ?? "");
-  const [workDateEnd, setWorkDateEnd] = useState(existing?.work_date_end ?? "");
-  const [impactLevel, setImpactLevel] = useState<ImpactLevel | "">(existing?.impact_level ?? "medium");
+  const [factoryIds, setFactoryIds] = useState<string[]>(
+    Array.from(new Set((existing?.plants ?? []).map((p) => p.factoryId)))
+  );
+  const [plantIds, setPlantIds] = useState<string[]>((existing?.plants ?? []).map((p) => p.id));
+  const [dateMode, setDateMode] = useState<"single" | "range">(existing?.workDateEnd ? "range" : "single");
+  const [workDate, setWorkDate] = useState(existing?.workDate ?? "");
+  const [workDateEnd, setWorkDateEnd] = useState(existing?.workDateEnd ?? "");
+  const [impactLevel, setImpactLevel] = useState<ImpactLevel | "">(existing?.impactLevel ?? "medium");
 
   const [summary, setSummary] = useState(existing?.summary ?? "");
-  const [detailedDescription, setDetailedDescription] = useState(existing?.detailed_description ?? "");
-  const [problemDescription, setProblemDescription] = useState(existing?.problem_description ?? "");
-  const [solutionDescription, setSolutionDescription] = useState(existing?.solution_description ?? "");
-  const [resultDescription, setResultDescription] = useState(existing?.result_description ?? "");
+  const [detailedDescription, setDetailedDescription] = useState(existing?.detailedDescription ?? "");
+  const [problemDescription, setProblemDescription] = useState(existing?.problemDescription ?? "");
+  const [solutionDescription, setSolutionDescription] = useState(existing?.solutionDescription ?? "");
+  const [resultDescription, setResultDescription] = useState(existing?.resultDescription ?? "");
 
-  const [financialGainStatus, setFinancialGainStatus] = useState<FinancialGainStatus>(existing?.financial_gain_status ?? "not_calculated");
-  const [estimatedAmount, setEstimatedAmount] = useState(existing?.estimated_amount?.toString() ?? "");
-  const [verifiedAmount, setVerifiedAmount] = useState(existing?.verified_amount?.toString() ?? "");
+  const [financialGainStatus, setFinancialGainStatus] = useState<FinancialGainStatus>(existing?.financialGainStatus ?? "not_calculated");
+  const [gainAmount, setGainAmount] = useState(existing?.gainAmount?.toString() ?? "");
   const [currency, setCurrency] = useState<ContributionCurrency>(existing?.currency ?? "TRY");
-  const [gainPeriod, setGainPeriod] = useState<GainPeriod | "">(existing?.gain_period ?? "");
-  const [isGainVerified, setIsGainVerified] = useState(existing?.is_gain_verified ?? false);
-  const [verifiedByDepartment, setVerifiedByDepartment] = useState<VerifyingDepartment | "">(existing?.verified_by_department ?? "");
-  const [verifiedByDepartmentOtherNote, setVerifiedByDepartmentOtherNote] = useState(existing?.verified_by_department_other_note ?? "");
-  const [verificationDate, setVerificationDate] = useState(existing?.verification_date ?? "");
-  const [verificationNote, setVerificationNote] = useState(existing?.verification_note ?? "");
+  const [gainPeriod, setGainPeriod] = useState<GainPeriod | "">(existing?.gainPeriod ?? "");
 
-  const [previousDuration, setPreviousDuration] = useState(existing?.previous_duration?.toString() ?? "");
-  const [newDuration, setNewDuration] = useState(existing?.new_duration?.toString() ?? "");
-  const [durationUnit, setDurationUnit] = useState<ContributionTimeUnit>(existing?.duration_unit ?? "minute");
-  const [repeatPeriod, setRepeatPeriod] = useState<RepeatPeriod | "">(existing?.repeat_period ?? "");
+  const [previousDuration, setPreviousDuration] = useState(existing?.previousDuration?.toString() ?? "");
+  const [newDuration, setNewDuration] = useState(existing?.newDuration?.toString() ?? "");
+  const [durationUnit, setDurationUnit] = useState<ContributionTimeUnit>(existing?.durationUnit ?? "minute");
+  const [repeatPeriod, setRepeatPeriod] = useState<RepeatPeriod | "">(existing?.repeatPeriod ?? "");
 
   const [gains, setGains] = useState<ContributionGainInput[]>(
     existing?.gains.map((g) => ({
-      gain_type: g.gain_type, gain_type_other_note: g.gain_type_other_note ?? undefined,
-      previous_value: g.previous_value ?? undefined, next_value: g.next_value ?? undefined,
-      unit: g.unit ?? undefined, measurement_period: g.measurement_period ?? undefined, description: g.description ?? undefined,
+      gainType: g.gainType, gainTypeOtherNote: g.gainTypeOtherNote ?? undefined,
+      previousValue: g.previousValue ?? undefined, nextValue: g.nextValue ?? undefined,
+      unit: g.unit ?? undefined, measurementPeriod: g.measurementPeriod ?? undefined, description: g.description ?? undefined,
     })) ?? []
   );
 
-  const [isStandardized, setIsStandardized] = useState(existing?.is_standardized ?? false);
-  const [isApplicableOtherPlants, setIsApplicableOtherPlants] = useState(existing?.is_applicable_other_plants ?? false);
-  const [isPermanentSolution, setIsPermanentSolution] = useState(existing?.is_permanent_solution ?? false);
-  const [workInstructionUpdated, setWorkInstructionUpdated] = useState(existing?.work_instruction_updated ?? false);
+  const [isStandardized, setIsStandardized] = useState(existing?.isStandardized ?? false);
+  const [isApplicableOtherPlants, setIsApplicableOtherPlants] = useState(existing?.isApplicableOtherPlants ?? false);
+  const [isPermanentSolution, setIsPermanentSolution] = useState(existing?.isPermanentSolution ?? false);
+  const [workInstructionUpdated, setWorkInstructionUpdated] = useState(existing?.workInstructionUpdated ?? false);
 
   const [fieldErrors, setFieldErrors] = useState<Record<string, string>>({});
   const [error, setError] = useState<string | null>(null);
@@ -141,9 +135,18 @@ export function ContributionWorkForm({ existing, onClose }: Props) {
   };
 
   const plantsForFactory = useMemo(
-    () => (filterOptions.data?.plants ?? []).filter((p) => !factoryId || p.factory_id === factoryId),
-    [filterOptions.data, factoryId]
+    () => (filterOptions.data?.plants ?? []).filter((p) => factoryIds.length === 0 || factoryIds.includes(p.factoryId)),
+    [filterOptions.data, factoryIds]
   );
+
+  // Türü WORK_TYPE_OPTIONS içinden kaldırılmış bir çalışma düzenleniyorsa kullanıcı bilerek
+  // değiştirene kadar alanın boş render edilmemesi için mevcut tür seçilebilir kalır.
+  const workTypeOptions = useMemo(() => {
+    if (existing?.workType && !WORK_TYPE_OPTIONS.some(([v]) => v === existing.workType)) {
+      return [...WORK_TYPE_OPTIONS, [existing.workType, `${WORK_TYPE_LABELS[existing.workType]} (kaldırıldı)`] as [ContributionWorkType, string]];
+    }
+    return WORK_TYPE_OPTIONS;
+  }, [existing?.workType]);
 
   const prevDurationNum = previousDuration === "" ? null : Number(previousDuration);
   const newDurationNum = newDuration === "" ? null : Number(newDuration);
@@ -157,9 +160,11 @@ export function ContributionWorkForm({ existing, onClose }: Props) {
     onClose();
   };
 
+  const containerRef = useModalA11y(handleClose);
+
   function addGain() {
     setDirty(true);
-    setGains((g) => [...g, { gain_type: "other" }]);
+    setGains((g) => [...g, { gainType: "other" }]);
   }
   function updateGain(index: number, patch: Partial<ContributionGainInput>) {
     setDirty(true);
@@ -173,36 +178,30 @@ export function ContributionWorkForm({ existing, onClose }: Props) {
   function buildPayload(status: "draft" | "published"): ContributionWorkCreatePayload {
     return {
       title, status,
-      work_type: workType || undefined,
-      work_type_other_note: workTypeOtherNote || undefined,
+      workType: workType || undefined,
+      workTypeOtherNote: workTypeOtherNote || undefined,
       summary: summary || undefined,
-      detailed_description: detailedDescription || undefined,
-      problem_description: problemDescription || undefined,
-      solution_description: solutionDescription || undefined,
-      result_description: resultDescription || undefined,
-      foreman_ids: foremen.map((f) => f.id),
-      plant_id: plantId || undefined,
-      work_date: workDate || undefined,
-      work_date_end: dateMode === "range" ? workDateEnd || undefined : undefined,
-      impact_level: impactLevel || undefined,
-      is_standardized: isStandardized,
-      is_applicable_other_plants: isApplicableOtherPlants,
-      is_permanent_solution: isPermanentSolution,
-      work_instruction_updated: workInstructionUpdated,
-      financial_gain_status: financialGainStatus,
-      estimated_amount: estimatedAmount === "" ? undefined : Number(estimatedAmount),
-      verified_amount: verifiedAmount === "" ? undefined : Number(verifiedAmount),
+      detailedDescription: detailedDescription || undefined,
+      problemDescription: problemDescription || undefined,
+      solutionDescription: solutionDescription || undefined,
+      resultDescription: resultDescription || undefined,
+      foremanIds: foremen.map((f) => f.id),
+      plantIds,
+      workDate: workDate || undefined,
+      workDateEnd: dateMode === "range" ? workDateEnd || undefined : undefined,
+      impactLevel: impactLevel || undefined,
+      isStandardized,
+      isApplicableOtherPlants,
+      isPermanentSolution,
+      workInstructionUpdated,
+      financialGainStatus,
+      gainAmount: gainAmount === "" ? undefined : Number(gainAmount),
       currency: financialGainStatus === "yes" ? currency : undefined,
-      gain_period: gainPeriod || undefined,
-      is_gain_verified: isGainVerified,
-      verified_by_department: verifiedByDepartment || undefined,
-      verified_by_department_other_note: verifiedByDepartmentOtherNote || undefined,
-      verification_date: verificationDate || undefined,
-      verification_note: verificationNote || undefined,
-      previous_duration: prevDurationNum ?? undefined,
-      new_duration: newDurationNum ?? undefined,
-      duration_unit: previousDuration || newDuration ? durationUnit : undefined,
-      repeat_period: repeatPeriod || undefined,
+      gainPeriod: gainPeriod || undefined,
+      previousDuration: prevDurationNum ?? undefined,
+      newDuration: newDurationNum ?? undefined,
+      durationUnit: previousDuration || newDuration ? durationUnit : undefined,
+      repeatPeriod: repeatPeriod || undefined,
       gains,
     };
   }
@@ -242,22 +241,27 @@ export function ContributionWorkForm({ existing, onClose }: Props) {
   }
 
   const isPending = createMutation.isPending || updateMutation.isPending;
-  const basicsHasError = !!(fieldErrors.title || fieldErrors.work_type || fieldErrors.work_type_other_note || fieldErrors.summary);
-  const peopleHasError = !!(fieldErrors.foreman_ids || fieldErrors.plant_id || fieldErrors.work_date || fieldErrors.work_date_end);
-  const flowHasError = !!(fieldErrors.problem_description || fieldErrors.solution_description);
+  const basicsHasError = !!(fieldErrors.title || fieldErrors.workType || fieldErrors.workTypeOtherNote || fieldErrors.summary);
+  const peopleHasError = !!(fieldErrors.foremanIds || fieldErrors.plantIds || fieldErrors.workDate || fieldErrors.workDateEnd);
+  const flowHasError = !!(fieldErrors.problemDescription || fieldErrors.solutionDescription);
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4" onClick={handleClose}>
       <div
-        className="flex max-h-[92vh] w-full max-w-3xl flex-col overflow-hidden rounded-lg shadow-xl"
+        ref={containerRef}
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="contribution-work-form-title"
+        tabIndex={-1}
+        className="flex max-h-[92vh] w-full max-w-3xl flex-col overflow-hidden rounded-lg shadow-xl focus:outline-none"
         style={{ background: "var(--surface)" }}
         onClick={(e) => e.stopPropagation()}
       >
         <div className="flex items-center justify-between border-b px-5 py-4" style={{ borderColor: "var(--border)" }}>
-          <h3 className="text-sm font-semibold" style={{ color: "var(--text-primary)" }}>
-            {isEdit ? "Çalışmayı Düzenle" : "Yeni Katkı / İyileştirme Çalışması"}
+          <h3 id="contribution-work-form-title" className="text-sm font-semibold" style={{ color: "var(--text-primary)" }}>
+            {isEdit ? "Çalışmayı Düzenle" : "Yeni Operational Impact+ Çalışması"}
           </h3>
-          <button type="button" onClick={handleClose} style={{ color: "var(--text-muted)" }}>
+          <button type="button" onClick={handleClose} aria-label="Kapat" style={{ color: "var(--text-muted)" }}>
             <X size={18} strokeWidth={2} />
           </button>
         </div>
@@ -267,39 +271,44 @@ export function ContributionWorkForm({ existing, onClose }: Props) {
             <div>
               <label className={labelClass} style={labelStyle}>İlgili Formen(ler)</label>
               <ForemanMultiSelect selected={foremen} onChange={markDirty(setForemen)} />
-              <FieldError message={fieldErrors.foreman_ids} />
+              <FieldError message={fieldErrors.foremanIds} />
             </div>
 
             <div className="grid grid-cols-2 gap-3">
               <div>
-                <label className={labelClass} style={labelStyle}>Fabrika</label>
-                <select
-                  value={factoryId}
-                  onChange={(e) => { markDirty(setFactoryId)(e.target.value); setPlantId(""); }}
-                  className={fieldClass} style={fieldStyle}
-                >
-                  <option value="">Seçiniz</option>
-                  {filterOptions.data?.factories.map((f) => <option key={f.id} value={f.id}>{f.code} — {f.name}</option>)}
-                </select>
+                <label className={labelClass} style={labelStyle}>Fabrika(lar)</label>
+                <MultiSelect
+                  label="Fabrika"
+                  options={(filterOptions.data?.factories ?? []).map((f) => ({ id: f.id, name: f.name, hint: f.code }))}
+                  selected={factoryIds}
+                  onChange={(ids) => {
+                    markDirty(setFactoryIds)(ids);
+                    if (ids.length > 0) {
+                      setPlantIds((current) =>
+                        current.filter((pid) => {
+                          const plant = filterOptions.data?.plants.find((p) => p.id === pid);
+                          return plant && ids.includes(plant.factoryId);
+                        })
+                      );
+                    }
+                  }}
+                />
               </div>
               <div>
-                <label className={labelClass} style={labelStyle}>Tesis</label>
-                <select
-                  value={plantId}
-                  onChange={(e) => markDirty(setPlantId)(e.target.value)}
-                  disabled={!factoryId}
-                  className={`${fieldClass} disabled:opacity-50`} style={fieldStyle}
-                >
-                  <option value="">Seçiniz</option>
-                  {plantsForFactory.map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}
-                </select>
-                <FieldError message={fieldErrors.plant_id} />
+                <label className={labelClass} style={labelStyle}>Tesis(ler)</label>
+                <MultiSelect
+                  label="Tesis"
+                  options={plantsForFactory.map((p) => ({ id: p.id, name: p.name }))}
+                  selected={plantIds}
+                  onChange={markDirty(setPlantIds)}
+                />
+                <FieldError message={fieldErrors.plantIds} />
               </div>
             </div>
 
             <div>
               <label className={labelClass} style={labelStyle}>Kaydı Oluşturan Yönetici</label>
-              <input disabled value={user?.full_name ?? ""} className={`${fieldClass} disabled:opacity-70`} style={fieldStyle} />
+              <input disabled value={user?.fullName ?? ""} className={`${fieldClass} disabled:opacity-70`} style={fieldStyle} />
             </div>
 
             <div>
@@ -320,7 +329,7 @@ export function ContributionWorkForm({ existing, onClose }: Props) {
                   <input type="date" value={workDateEnd} min={workDate || undefined} onChange={(e) => markDirty(setWorkDateEnd)(e.target.value)} className={fieldClass} style={fieldStyle} />
                 )}
               </div>
-              <FieldError message={fieldErrors.work_date || fieldErrors.work_date_end} />
+              <FieldError message={fieldErrors.workDate || fieldErrors.workDateEnd} />
             </div>
           </Section>
 
@@ -336,9 +345,9 @@ export function ContributionWorkForm({ existing, onClose }: Props) {
                 <label className={labelClass} style={labelStyle}>Çalışma Türü</label>
                 <select value={workType} onChange={(e) => markDirty(setWorkType)(e.target.value as ContributionWorkType)} className={fieldClass} style={fieldStyle}>
                   <option value="">Seçiniz</option>
-                  {WORK_TYPE_OPTIONS.map(([v, l]) => <option key={v} value={v}>{l}</option>)}
+                  {workTypeOptions.map(([v, l]) => <option key={v} value={v}>{l}</option>)}
                 </select>
-                <FieldError message={fieldErrors.work_type} />
+                <FieldError message={fieldErrors.workType} />
               </div>
               <div>
                 <label className={labelClass} style={labelStyle}>Etki Seviyesi</label>
@@ -351,7 +360,7 @@ export function ContributionWorkForm({ existing, onClose }: Props) {
               <div>
                 <label className={labelClass} style={labelStyle}>Çalışma Türünü Açıklayın</label>
                 <input value={workTypeOtherNote} onChange={(e) => markDirty(setWorkTypeOtherNote)(e.target.value)} className={fieldClass} style={fieldStyle} />
-                <FieldError message={fieldErrors.work_type_other_note} />
+                <FieldError message={fieldErrors.workTypeOtherNote} />
               </div>
             )}
 
@@ -370,12 +379,12 @@ export function ContributionWorkForm({ existing, onClose }: Props) {
             <div>
               <label className={labelClass} style={labelStyle}>Tespit Edilen Problem</label>
               <textarea value={problemDescription} onChange={(e) => markDirty(setProblemDescription)(e.target.value)} rows={2} className={fieldClass} style={fieldStyle} />
-              <FieldError message={fieldErrors.problem_description} />
+              <FieldError message={fieldErrors.problemDescription} />
             </div>
             <div>
               <label className={labelClass} style={labelStyle}>Uygulanan Çözüm</label>
               <textarea value={solutionDescription} onChange={(e) => markDirty(setSolutionDescription)(e.target.value)} rows={2} className={fieldClass} style={fieldStyle} />
-              <FieldError message={fieldErrors.solution_description} />
+              <FieldError message={fieldErrors.solutionDescription} />
             </div>
             <div>
               <label className={labelClass} style={labelStyle}>Elde Edilen Sonuç</label>
@@ -394,13 +403,9 @@ export function ContributionWorkForm({ existing, onClose }: Props) {
             {financialGainStatus === "yes" && (
               <>
                 <div className="grid grid-cols-3 gap-3">
-                  <div>
-                    <label className={labelClass} style={labelStyle}>Tahmini Kazanç Tutarı</label>
-                    <input type="number" value={estimatedAmount} onChange={(e) => markDirty(setEstimatedAmount)(e.target.value)} className={fieldClass} style={fieldStyle} />
-                  </div>
-                  <div>
-                    <label className={labelClass} style={labelStyle}>Doğrulanmış Kazanç Tutarı</label>
-                    <input type="number" value={verifiedAmount} onChange={(e) => markDirty(setVerifiedAmount)(e.target.value)} className={fieldClass} style={fieldStyle} />
+                  <div className="col-span-2">
+                    <label className={labelClass} style={labelStyle}>Kazanç Tutarı</label>
+                    <input type="number" value={gainAmount} onChange={(e) => markDirty(setGainAmount)(e.target.value)} className={fieldClass} style={fieldStyle} />
                   </div>
                   <div>
                     <label className={labelClass} style={labelStyle}>Para Birimi</label>
@@ -411,9 +416,6 @@ export function ContributionWorkForm({ existing, onClose }: Props) {
                     </select>
                   </div>
                 </div>
-                <p className="text-xs" style={{ color: "var(--text-muted)" }}>
-                  Tahmini ve doğrulanmış kazanç ayrı alanlar olarak saklanır; doğrulanmış tutar girilmeden tahmini tutar doğrulanmış gibi gösterilmez.
-                </p>
 
                 <div>
                   <label className={labelClass} style={labelStyle}>Kazanç Periyodu</label>
@@ -422,37 +424,6 @@ export function ContributionWorkForm({ existing, onClose }: Props) {
                     {(Object.entries(GAIN_PERIOD_LABELS) as [GainPeriod, string][]).map(([v, l]) => <option key={v} value={v}>{l}</option>)}
                   </select>
                 </div>
-
-                <label className="flex items-center gap-2 text-[13px]" style={{ color: "var(--text-primary)" }}>
-                  <input type="checkbox" checked={isGainVerified} onChange={(e) => markDirty(setIsGainVerified)(e.target.checked)} />
-                  Kazanç doğrulandı mı?
-                </label>
-
-                {isGainVerified && (
-                  <div className="grid grid-cols-2 gap-3">
-                    <div>
-                      <label className={labelClass} style={labelStyle}>Doğrulayan Birim</label>
-                      <select value={verifiedByDepartment} onChange={(e) => markDirty(setVerifiedByDepartment)(e.target.value as VerifyingDepartment)} className={fieldClass} style={fieldStyle}>
-                        <option value="">Seçiniz</option>
-                        {(Object.entries(DEPARTMENT_LABELS) as [VerifyingDepartment, string][]).map(([v, l]) => <option key={v} value={v}>{l}</option>)}
-                      </select>
-                    </div>
-                    <div>
-                      <label className={labelClass} style={labelStyle}>Doğrulama Tarihi</label>
-                      <input type="date" value={verificationDate} onChange={(e) => markDirty(setVerificationDate)(e.target.value)} className={fieldClass} style={fieldStyle} />
-                    </div>
-                    {verifiedByDepartment === "other" && (
-                      <div className="col-span-2">
-                        <label className={labelClass} style={labelStyle}>Birimi Açıklayın</label>
-                        <input value={verifiedByDepartmentOtherNote} onChange={(e) => markDirty(setVerifiedByDepartmentOtherNote)(e.target.value)} className={fieldClass} style={fieldStyle} />
-                      </div>
-                    )}
-                    <div className="col-span-2">
-                      <label className={labelClass} style={labelStyle}>Doğrulama Notu</label>
-                      <textarea value={verificationNote} onChange={(e) => markDirty(setVerificationNote)(e.target.value)} rows={2} className={fieldClass} style={fieldStyle} />
-                    </div>
-                  </div>
-                )}
               </>
             )}
           </Section>
@@ -476,7 +447,7 @@ export function ContributionWorkForm({ existing, onClose }: Props) {
             </div>
 
             {newDurationInvalid && (
-              <p className="flex items-center gap-1.5 text-xs font-medium" style={{ color: "#b45309" }}>
+              <p className="flex items-center gap-1.5 text-xs font-medium" style={{ color: "var(--status-neutral)" }}>
                 <TriangleAlert size={13} strokeWidth={2.5} />
                 Yeni işlem süresi öncekinden büyük veya eşit olduğu için kazanç hesaplanamıyor.
               </p>
@@ -500,7 +471,7 @@ export function ContributionWorkForm({ existing, onClose }: Props) {
 
           <Section title="6. Diğer Kazanımlar" defaultOpen={false}>
             {gains.map((gain, i) => {
-              const { amount, percent } = computeChange(gain.previous_value ?? null, gain.next_value ?? null);
+              const { amount, percent } = computeChange(gain.previousValue ?? null, gain.nextValue ?? null);
               return (
                 <div key={i} className="rounded-md p-3" style={{ border: "1px solid var(--border)" }}>
                   <div className="mb-2 flex items-center justify-between">
@@ -512,7 +483,7 @@ export function ContributionWorkForm({ existing, onClose }: Props) {
                   <div className="grid grid-cols-2 gap-3">
                     <div>
                       <label className={labelClass} style={labelStyle}>Kazanım Türü</label>
-                      <select value={gain.gain_type} onChange={(e) => updateGain(i, { gain_type: e.target.value as OtherGainType })} className={fieldClass} style={fieldStyle}>
+                      <select value={gain.gainType} onChange={(e) => updateGain(i, { gainType: e.target.value as OtherGainType })} className={fieldClass} style={fieldStyle}>
                         {(Object.entries(GAIN_TYPE_LABELS) as [OtherGainType, string][]).map(([v, l]) => <option key={v} value={v}>{l}</option>)}
                       </select>
                     </div>
@@ -520,23 +491,23 @@ export function ContributionWorkForm({ existing, onClose }: Props) {
                       <label className={labelClass} style={labelStyle}>Ölçüm Birimi</label>
                       <input value={gain.unit ?? ""} onChange={(e) => updateGain(i, { unit: e.target.value })} className={fieldClass} style={fieldStyle} />
                     </div>
-                    {gain.gain_type === "other" && (
+                    {gain.gainType === "other" && (
                       <div className="col-span-2">
                         <label className={labelClass} style={labelStyle}>Türü Açıklayın</label>
-                        <input value={gain.gain_type_other_note ?? ""} onChange={(e) => updateGain(i, { gain_type_other_note: e.target.value })} className={fieldClass} style={fieldStyle} />
+                        <input value={gain.gainTypeOtherNote ?? ""} onChange={(e) => updateGain(i, { gainTypeOtherNote: e.target.value })} className={fieldClass} style={fieldStyle} />
                       </div>
                     )}
                     <div>
                       <label className={labelClass} style={labelStyle}>Önceki Değer</label>
-                      <input type="number" value={gain.previous_value ?? ""} onChange={(e) => updateGain(i, { previous_value: e.target.value === "" ? undefined : Number(e.target.value) })} className={fieldClass} style={fieldStyle} />
+                      <input type="number" value={gain.previousValue ?? ""} onChange={(e) => updateGain(i, { previousValue: e.target.value === "" ? undefined : Number(e.target.value) })} className={fieldClass} style={fieldStyle} />
                     </div>
                     <div>
                       <label className={labelClass} style={labelStyle}>Sonraki Değer</label>
-                      <input type="number" value={gain.next_value ?? ""} onChange={(e) => updateGain(i, { next_value: e.target.value === "" ? undefined : Number(e.target.value) })} className={fieldClass} style={fieldStyle} />
+                      <input type="number" value={gain.nextValue ?? ""} onChange={(e) => updateGain(i, { nextValue: e.target.value === "" ? undefined : Number(e.target.value) })} className={fieldClass} style={fieldStyle} />
                     </div>
                     <div>
                       <label className={labelClass} style={labelStyle}>Ölçüm Dönemi</label>
-                      <input value={gain.measurement_period ?? ""} onChange={(e) => updateGain(i, { measurement_period: e.target.value })} className={fieldClass} style={fieldStyle} />
+                      <input value={gain.measurementPeriod ?? ""} onChange={(e) => updateGain(i, { measurementPeriod: e.target.value })} className={fieldClass} style={fieldStyle} />
                     </div>
                     <div className="col-span-2">
                       <label className={labelClass} style={labelStyle}>Açıklama</label>
@@ -581,7 +552,7 @@ export function ContributionWorkForm({ existing, onClose }: Props) {
             </label>
           </Section>
 
-          {error && <p className="text-xs font-medium" style={{ color: "#b91c1c" }}>{error}</p>}
+          {error && <p className="text-xs font-medium" style={{ color: "var(--status-negative)" }}>{error}</p>}
         </div>
 
         <div className="flex items-center justify-end gap-2 border-t px-5 py-3" style={{ borderColor: "var(--border)" }}>

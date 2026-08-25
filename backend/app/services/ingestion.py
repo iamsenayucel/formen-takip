@@ -1,7 +1,9 @@
 
 from __future__ import annotations
 
+import logging
 import uuid
+from collections import Counter
 from datetime import date, datetime, timezone
 from decimal import Decimal
 
@@ -9,7 +11,7 @@ from sqlalchemy import bindparam, select, tuple_, update
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.orm import Session
 
-from app.models.enums import DataQualityStatus, IntegrationStatus
+from app.models.enums import DataQualityStatus, IntegrationStatus, TargetScopeType
 from app.models.foreman import Chief, Foreman, ForemanAssignment
 from app.models.integration import DataQualityIssue, IntegrationRun
 from app.models.kpi import Kpi, KpiCalculationRule, KpiTarget
@@ -18,7 +20,10 @@ from app.models.performance import PerformanceRecord, PerformanceScore
 from app.services.assignment_resolver import NoActiveAssignmentError, resolve_assignment
 from app.services.kpi_engine import compute_score_for_rule
 from app.services.providers.base import PerformanceDataProvider, RawPerformanceRecord
+from app.services.rule_resolver import NoRuleFoundError, resolve_rule
 from app.services.target_resolver import NoTargetFoundError, resolve_target
+
+logger = logging.getLogger(__name__)
 
 BATCH_SIZE = 1000
 
@@ -33,14 +38,14 @@ class _Lookups:
         self.shift_list = list(self.shifts.values())
         self.assignments = list(db.scalars(select(ForemanAssignment)))
 
-        self.calculation_rules: dict[str, KpiCalculationRule] = {}
-        for rule in db.scalars(select(KpiCalculationRule).where(KpiCalculationRule.is_active.is_(True))):
-            kpi = next((k for k in self.kpis.values() if k.id == rule.kpi_id), None)
-            if kpi:
-                self.calculation_rules[kpi.code] = rule
+        self.rules_by_kpi: dict[uuid.UUID, list[KpiCalculationRule]] = {}
+        rules_stmt = select(KpiCalculationRule).order_by(KpiCalculationRule.valid_from.desc(), KpiCalculationRule.id)
+        for rule in db.scalars(rules_stmt):
+            self.rules_by_kpi.setdefault(rule.kpi_id, []).append(rule)
 
         self.targets_by_kpi: dict[uuid.UUID, list[KpiTarget]] = {}
-        for target in db.scalars(select(KpiTarget).where(KpiTarget.is_active.is_(True))):
+        targets_stmt = select(KpiTarget).order_by(KpiTarget.valid_from.desc(), KpiTarget.id)
+        for target in db.scalars(targets_stmt):
             self.targets_by_kpi.setdefault(target.kpi_id, []).append(target)
 
 
@@ -105,6 +110,7 @@ def run_ingestion(
     lookups = _Lookups(db)
 
     processed = success = errors = skipped = 0
+    target_fallback_counts: Counter[tuple[str, str]] = Counter()
     record_batch: list[dict] = []
     score_batch: list[dict] = []
     quality_meta_batch: list[dict] = []
@@ -316,6 +322,8 @@ def run_ingestion(
                     plant.id,
                 )
                 target_value = resolved.target_value
+                if resolved.resolved_scope != TargetScopeType.PLANT:
+                    target_fallback_counts[(kpi.code, resolved.resolved_scope.value)] += 1
             except NoTargetFoundError:
                 status = DataQualityStatus.NEEDS_SOURCE_CORRECTION
 
@@ -349,7 +357,10 @@ def run_ingestion(
         )
 
         if status == DataQualityStatus.COMPLETE and target_value is not None:
-            rule = lookups.calculation_rules.get(kpi.code)
+            try:
+                rule = resolve_rule(lookups.rules_by_kpi.get(kpi.id, []), raw.performance_date)
+            except NoRuleFoundError:
+                rule = None
             if rule is not None:
                 score = compute_score_for_rule(
                     rule.calculation_type, rule.parameters,
@@ -378,6 +389,14 @@ def run_ingestion(
             flush()
 
     flush()
+
+    if target_fallback_counts:
+        logger.warning(
+            "run_ingestion: %d kayıt PLANT seviyesinde hedef bulamadı, daha geniş kapsama (COMPANY/CHIEF/FOREMAN) "
+            "düştü — tesis bazlı hedef kapsaması eksik olabilir: %s",
+            sum(target_fallback_counts.values()),
+            dict(target_fallback_counts),
+        )
 
     run.finished_at = datetime.now(timezone.utc)
     run.processed_count = processed

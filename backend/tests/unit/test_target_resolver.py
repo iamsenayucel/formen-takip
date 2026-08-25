@@ -5,7 +5,7 @@ from uuid import UUID, uuid4
 import pytest
 
 from app.models.enums import TargetScopeType
-from app.services.target_resolver import NoTargetFoundError, resolve_target
+from app.services.target_resolver import AmbiguousTargetError, NoTargetFoundError, resolve_target
 
 
 @dataclass
@@ -84,3 +84,34 @@ class TestTargetResolutionOrder:
     def test_no_target_raises(self):
         with pytest.raises(NoTargetFoundError):
             resolve([])
+
+
+class TestAmbiguousTargetDetection:
+    def test_two_overlapping_active_targets_same_scope_raises(self):
+        candidates = [
+            FakeTarget(TargetScopeType.COMPANY, None, 100, date(2025, 1, 1), None),
+            FakeTarget(TargetScopeType.PLANT, PLANT_ID, 105, date(2025, 1, 1), None),
+            FakeTarget(TargetScopeType.PLANT, PLANT_ID, 999, date(2025, 6, 1), None),
+        ]
+        with pytest.raises(AmbiguousTargetError):
+            resolve(candidates)
+
+    def test_ambiguity_is_detected_regardless_of_candidate_order(self):
+        candidates = [
+            FakeTarget(TargetScopeType.FOREMAN, FOREMAN_ID, 999, date(2025, 6, 1), None),
+            FakeTarget(TargetScopeType.COMPANY, None, 100, date(2025, 1, 1), None),
+            FakeTarget(TargetScopeType.FOREMAN, FOREMAN_ID, 130, date(2025, 1, 1), None),
+        ]
+        with pytest.raises(AmbiguousTargetError):
+            resolve(candidates)
+        with pytest.raises(AmbiguousTargetError):
+            resolve(list(reversed(candidates)))
+
+    def test_non_overlapping_sequential_targets_are_not_ambiguous(self):
+        candidates = [
+            FakeTarget(TargetScopeType.COMPANY, None, 100, date(2025, 1, 1), None),
+            FakeTarget(TargetScopeType.PLANT, PLANT_ID, 105, date(2025, 1, 1), date(2026, 2, 28)),
+            FakeTarget(TargetScopeType.PLANT, PLANT_ID, 115, date(2026, 3, 1), None),
+        ]
+        result = resolve(candidates)
+        assert result.target_value == 115

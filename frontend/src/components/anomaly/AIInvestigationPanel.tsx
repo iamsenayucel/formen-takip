@@ -42,14 +42,20 @@ function StatTile({ label, value }: { label: string; value: string }) {
 function ClassificationTag({ kind }: { kind: "verified" | "missing" }) {
   if (kind === "verified") {
     return (
-      <span className="inline-flex items-center gap-1 rounded px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide" style={{ background: "#dcfce722", color: "#15803d", border: "1px solid #15803d33" }}>
+      <span
+        className="inline-flex items-center gap-1 rounded px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide"
+        style={{ background: "var(--status-positive-bg)", color: "var(--status-positive)", border: "1px solid var(--status-positive-border)" }}
+      >
         <CheckCircle2 size={10} strokeWidth={2} />
         Doğrulanmış Veri
       </span>
     );
   }
   return (
-    <span className="inline-flex items-center gap-1 rounded px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide" style={{ background: "#64748b14", color: "#64748b", border: "1px solid #64748b33" }}>
+    <span
+      className="inline-flex items-center gap-1 rounded px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide"
+      style={{ background: "var(--status-unknown-bg)", color: "var(--status-unknown)", border: "1px solid var(--status-unknown-border)" }}
+    >
       <HelpCircle size={10} strokeWidth={2} />
       Eksik Veri
     </span>
@@ -66,13 +72,13 @@ export function AIInvestigationPanel({
   onSelectMode: (m: AnalysisMode) => void;
   onRunAnalysis: (endpoint: "analyze" | "reanalyze") => void;
   actionError: string | null;
-  toolCallsData: { items: AnomalyToolCallItem[]; total: number } | undefined;
+  toolCallsData: AnomalyToolCallItem[] | undefined;
   toolCallsLoading: boolean;
   toolCallsError: boolean;
   stepsOpen: boolean;
   onToggleSteps: () => void;
 }) {
-  const latest: AnomalyAnalysisRecord | null = anomaly.latest_analysis;
+  const latest: AnomalyAnalysisRecord | null = anomaly.latestAnalysis;
   const result = latest?.result;
 
   return (
@@ -151,16 +157,24 @@ export function AIInvestigationPanel({
           <EmptyState message="Bu tespit için henüz yapay zekâ analizi oluşturulmadı." />
         )}
         {!isBusy && !actionError && latest && ["failed", "timed_out", "cancelled"].includes(latest.status) && (
-          <ErrorState message={latest.error_message ?? "Yapay zekâ analizi oluşturulamadı. Daha sonra yeniden deneyebilirsiniz."} />
+          <ErrorState message={latest.errorMessage ?? "Yapay zekâ analizi oluşturulamadı. Daha sonra yeniden deneyebilirsiniz."} />
         )}
         {!isBusy && !actionError && latest && result && (
-          <div className="flex flex-col gap-5">
+          <div
+            className="flex flex-col gap-5 rounded-lg p-4"
+            style={{ background: "var(--surface-highlight)", border: "1px solid var(--border-subtle)" }}
+          >
             <div className="flex flex-wrap items-center gap-2">
               <span
                 className="w-fit rounded px-2 py-0.5 text-[11px] font-semibold uppercase tracking-wide"
-                style={{ background: latest.is_demo ? "#fef3c7" : "#dcfce7", color: latest.is_demo ? "#92400e" : "#15803d" }}
+                style={
+                  latest.isDemo
+                    ? { background: "var(--status-neutral-bg)", color: "var(--status-neutral)" }
+                    : { background: "var(--status-positive-bg)", color: "var(--status-positive)" }
+                }
               >
-                {latest.is_demo ? "Demo Yapay Zekâ Analizi" : "Yapay Zekâ Analizi"}
+                <Sparkles size={10} strokeWidth={2} className="mr-1 inline" />
+                {latest.isDemo ? "Demo Yapay Zekâ Analizi" : "Yapay Zekâ Analizi"}
               </span>
               <span
                 className="w-fit rounded px-2 py-0.5 text-[11px] font-medium"
@@ -172,28 +186,28 @@ export function AIInvestigationPanel({
 
             <div>
               <h4 className="mb-1 text-xs font-semibold uppercase tracking-wide" style={{ color: "var(--text-secondary)" }}>Yönetici Özeti</h4>
-              <p className="text-[13px]" style={{ color: "var(--text-primary)" }}>{result.executive_summary}</p>
+              <p className="text-[13px]" style={{ color: "var(--text-primary)" }}>{result.executiveSummary}</p>
             </div>
 
             <div>
               <div className="mb-2 flex items-center gap-2">
                 <h4 className="text-xs font-semibold uppercase tracking-wide" style={{ color: "var(--text-secondary)" }}>
-                  Doğrulanmış Bulgular ({result.verified_findings.length})
+                  Doğrulanmış Bulgular ({result.verifiedFindings.length})
                 </h4>
                 <ClassificationTag kind="verified" />
               </div>
-              {result.verified_findings.length === 0 && <EmptyState message="Doğrulanmış bulgu bulunamadı." />}
+              {result.verifiedFindings.length === 0 && <EmptyState message="Doğrulanmış bulgu bulunamadı." />}
               <ul className="flex flex-col gap-1.5 text-[13px]">
-                {result.verified_findings.map((f, i) => (
+                {result.verifiedFindings.map((f, i) => (
                   <li key={i} className="flex flex-col gap-1 rounded-md p-2.5" style={{ border: "1px solid var(--border)" }}>
                     <div className="flex justify-between gap-3">
                       <span style={{ color: "var(--text-primary)" }}>{f.finding}</span>
                       <span className="shrink-0 tabular-nums" style={{ color: "var(--text-muted)" }}>{f.evidence}</span>
                     </div>
-                    {(f.source_refs ?? []).length > 0 && (
+                    {(f.sourceRefs ?? []).length > 0 && (
                       <span className="flex w-fit items-center gap-1 text-[11px]" style={{ color: "var(--accent)" }}>
                         <Database size={10} strokeWidth={2} />
-                        Kaynak: {(f.source_refs ?? []).map((r) => TOOL_LABELS[r.tool_name] ?? r.tool_name).join(", ")}
+                        Kaynak: {(f.sourceRefs ?? []).map((r) => TOOL_LABELS[r.toolName] ?? r.toolName).join(", ")}
                       </span>
                     )}
                   </li>
@@ -203,50 +217,50 @@ export function AIInvestigationPanel({
 
             <div>
               <h4 className="mb-2 text-xs font-semibold uppercase tracking-wide" style={{ color: "var(--text-secondary)" }}>
-                Olası Nedenler ({result.possible_causes.length})
+                Olası Nedenler ({result.possibleCauses.length})
               </h4>
-              {result.possible_causes.length === 0 && <EmptyState message="Olası neden üretilmedi." />}
+              {result.possibleCauses.length === 0 && <EmptyState message="Olası neden üretilmedi." />}
               <div className="flex flex-col gap-2.5">
-                {result.possible_causes.map((c, i) => <RootCauseHypothesisCard key={i} cause={c} toolLabels={TOOL_LABELS} />)}
+                {result.possibleCauses.map((c, i) => <RootCauseHypothesisCard key={i} cause={c} toolLabels={TOOL_LABELS} />)}
               </div>
             </div>
 
             <details className="rounded-md p-3" style={{ border: "1px solid var(--border)" }}>
               <summary className="cursor-pointer text-xs font-semibold uppercase tracking-wide" style={{ color: "var(--text-secondary)" }}>
-                Önerilen Araştırmalar ({result.recommended_investigations.length})
+                Önerilen Araştırmalar ({result.recommendedInvestigations.length})
               </summary>
               <ul className="mt-2 flex flex-col gap-2 text-[13px]">
-                {result.recommended_investigations.map((r, i) => (
+                {result.recommendedInvestigations.map((r, i) => (
                   <li key={i} className="flex items-start gap-2">
                     <Search size={13} strokeWidth={2} className="mt-0.5 shrink-0" style={{ color: "var(--text-muted)" }} />
                     <span style={{ color: "var(--text-primary)" }}>
-                      {r.step} — <span style={{ color: "var(--text-muted)" }}>{r.responsible_unit}, öncelik: {PRIORITY_LABELS[r.priority] ?? r.priority}, beklenen çıktı: {r.expected_output}</span>
+                      {r.step} — <span style={{ color: "var(--text-muted)" }}>{r.responsibleUnit}, öncelik: {PRIORITY_LABELS[r.priority] ?? r.priority}, beklenen çıktı: {r.expectedOutput}</span>
                     </span>
                   </li>
                 ))}
               </ul>
             </details>
 
-            <RecommendedActions immediateActions={result.immediate_actions} mediumTermActions={result.medium_term_actions} />
+            <RecommendedActions immediateActions={result.immediateActions} mediumTermActions={result.mediumTermActions} />
 
             <div>
               <div className="mb-1.5 flex items-center gap-2">
                 <h4 className="text-xs font-semibold uppercase tracking-wide" style={{ color: "var(--text-secondary)" }}>Eksik Bilgiler</h4>
-                {result.missing_information.length > 0 && <ClassificationTag kind="missing" />}
+                {result.missingInformation.length > 0 && <ClassificationTag kind="missing" />}
               </div>
-              {result.missing_information.length === 0 && (
+              {result.missingInformation.length === 0 && (
                 <p className="text-[13px]" style={{ color: "var(--text-muted)" }}>Eksik bilgi bildirilmedi.</p>
               )}
               <ul className="flex flex-col gap-1 text-[13px]" style={{ color: "var(--text-secondary)" }}>
-                {result.missing_information.map((m, i) => <li key={i}>• {m}</li>)}
+                {result.missingInformation.map((m, i) => <li key={i}>• {m}</li>)}
               </ul>
             </div>
 
             <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
-              <StatTile label="YZ Analiz Güveni" value={`${Math.round(result.analysis_confidence * 100)}%`} />
-              <StatTile label="ML Tespit Güveni" value={`${Math.round(anomaly.ml_confidence * 100)}%`} />
-              <StatTile label="Risk Seviyesi" value={RISK_LABELS[result.risk_level] ?? result.risk_level} />
-              <StatTile label="İnsan İncelemesi" value={result.requires_human_review ? "Gerekli" : "Gerekli Değil"} />
+              <StatTile label="YZ Analiz Güveni" value={`${Math.round(result.analysisConfidence * 100)}%`} />
+              <StatTile label="ML Tespit Güveni" value={`${Math.round(anomaly.mlConfidence * 100)}%`} />
+              <StatTile label="Risk Seviyesi" value={RISK_LABELS[result.riskLevel] ?? result.riskLevel} />
+              <StatTile label="İnsan İncelemesi" value={result.requiresHumanReview ? "Gerekli" : "Gerekli Değil"} />
             </div>
 
             {latest.mode === "tool_calling" && (
@@ -256,34 +270,34 @@ export function AIInvestigationPanel({
                   Analizde Kullanılan Veriler
                 </h4>
                 <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
-                  <StatTile label="Kullanılan Araç Sayısı" value={String((result.tools_used ?? []).length)} />
+                  <StatTile label="Kullanılan Araç Sayısı" value={String((result.toolsUsed ?? []).length)} />
                   <StatTile
                     label="İncelenen Tarih Aralığı"
-                    value={result.data_scope ? `${result.data_scope.start_date} – ${result.data_scope.end_date}` : "-"}
+                    value={result.dataScope ? `${result.dataScope.startDate} – ${result.dataScope.endDate}` : "-"}
                   />
-                  <StatTile label="İncelenen Kayıt Sayısı" value={result.data_scope ? String(result.data_scope.record_count) : "-"} />
+                  <StatTile label="İncelenen Kayıt Sayısı" value={result.dataScope ? String(result.dataScope.recordCount) : "-"} />
                   <StatTile
                     label="Veri Kalitesi"
-                    value={result.data_scope?.data_quality_status === "valid" ? "Geçerli" : (result.data_scope?.data_quality_status ?? "-")}
+                    value={result.dataScope?.dataQualityStatus === "valid" ? "Geçerli" : (result.dataScope?.dataQualityStatus ?? "-")}
                   />
                 </div>
-                {(result.tools_used ?? []).length > 0 && (
+                {(result.toolsUsed ?? []).length > 0 && (
                   <ul className="mt-2 flex flex-wrap gap-1.5">
-                    {(result.tools_used ?? []).map((t) => (
+                    {(result.toolsUsed ?? []).map((t) => (
                       <li
-                        key={t.tool_call_id}
+                        key={t.toolCallId}
                         title={t.purpose}
                         className="rounded px-2 py-0.5 text-[11px] font-medium"
                         style={{ background: "var(--accent-subtle)", color: "var(--accent)" }}
                       >
-                        {TOOL_LABELS[t.tool_name] ?? t.tool_name}
+                        {TOOL_LABELS[t.toolName] ?? t.toolName}
                       </li>
                     ))}
                   </ul>
                 )}
-                {(result.analysis_limitations ?? []).length > 0 && (
-                  <ul className="mt-2 flex flex-col gap-1 text-xs" style={{ color: "#b45309" }}>
-                    {(result.analysis_limitations ?? []).map((l) => (
+                {(result.analysisLimitations ?? []).length > 0 && (
+                  <ul className="mt-2 flex flex-col gap-1 text-xs" style={{ color: "var(--status-neutral)" }}>
+                    {(result.analysisLimitations ?? []).map((l) => (
                       <li key={l} className="flex items-center gap-1.5"><ShieldAlert size={11} strokeWidth={2} />{l}</li>
                     ))}
                   </ul>
@@ -297,8 +311,8 @@ export function AIInvestigationPanel({
             </p>
 
             <p className="text-xs" style={{ color: "var(--text-muted)" }}>
-              Analiz kaynağı: {latest.model} · Başlangıç: {latest.started_at.replace("T", " ").slice(0, 19)}
-              {latest.completed_at && ` · Bitiş: ${latest.completed_at.replace("T", " ").slice(0, 19)}`}
+              Analiz kaynağı: {latest.model} · Başlangıç: {latest.startedAt.replace("T", " ").slice(0, 19)}
+              {latest.completedAt && ` · Bitiş: ${latest.completedAt.replace("T", " ").slice(0, 19)}`}
             </p>
           </div>
         )}
@@ -308,45 +322,45 @@ export function AIInvestigationPanel({
         <Card title="Analiz Adımları">
           {toolCallsLoading && <LoadingState label="Adımlar yükleniyor..." />}
           {toolCallsError && <ErrorState message="Analiz adımları yüklenemedi." />}
-          {toolCallsData && toolCallsData.items.length === 0 && <EmptyState message="Bu analiz için kayıtlı araç çağrısı yok." />}
-          {toolCallsData && toolCallsData.items.length > 0 && (
+          {toolCallsData && toolCallsData.length === 0 && <EmptyState message="Bu analiz için kayıtlı araç çağrısı yok." />}
+          {toolCallsData && toolCallsData.length > 0 && (
             <button
               type="button"
               onClick={onToggleSteps}
               className="mb-2 text-xs font-medium hover:underline"
               style={{ color: "var(--accent)" }}
             >
-              {stepsOpen ? "Adımları gizle" : `${toolCallsData.total} adımı göster`}
+              {stepsOpen ? "Adımları gizle" : `${toolCallsData.length} adımı göster`}
             </button>
           )}
           {stepsOpen && toolCallsData && (
             <ol className="flex flex-col gap-2">
-              {toolCallsData.items.map((c) => (
+              {toolCallsData.map((c) => (
                 <li key={c.id} className="flex items-start gap-3 rounded-md p-2.5 text-[13px]" style={{ border: "1px solid var(--border)" }}>
                   <span
                     className="flex h-5 w-5 shrink-0 items-center justify-center rounded-full text-[11px] font-semibold"
                     style={{ background: "var(--accent-subtle)", color: "var(--accent)" }}
                   >
-                    {c.step_number}
+                    {c.stepNumber}
                   </span>
                   <div className="flex-1">
                     <div className="flex flex-wrap items-center justify-between gap-2">
-                      <span className="font-medium" style={{ color: "var(--text-primary)" }}>{c.tool_label}</span>
+                      <span className="font-medium" style={{ color: "var(--text-primary)" }}>{c.toolLabel}</span>
                       <span
                         className="rounded px-1.5 py-0.5 text-[11px] font-medium"
                         style={
                           c.status === "success"
-                            ? { background: "#dcfce7", color: "#15803d" }
-                            : { background: "#fee2e2", color: "#b91c1c" }
+                            ? { background: "var(--status-positive-bg)", color: "var(--status-positive)" }
+                            : { background: "var(--status-negative-bg)", color: "var(--status-negative)" }
                         }
                       >
                         {c.status === "success" ? "Başarılı" : c.status === "timeout" ? "Zaman Aşımı" : "Hata"}
                       </span>
                     </div>
                     <p className="mt-0.5 text-xs" style={{ color: "var(--text-muted)" }}>
-                      Süre: {c.duration_ms ?? 0} ms
-                      {c.record_count != null && ` · Dönen kayıt: ${c.record_count}`}
-                      {c.error_message && ` · ${c.error_message}`}
+                      Süre: {c.durationMs ?? 0} ms
+                      {c.recordCount != null && ` · Dönen kayıt: ${c.recordCount}`}
+                      {c.errorMessage && ` · ${c.errorMessage}`}
                     </p>
                   </div>
                 </li>

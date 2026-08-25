@@ -1,0 +1,13 @@
+// Rendered into /usr/share/nginx/html/config.js at container start by
+// docker-entrypoint.d/40-runtime-config.sh (envsubst, restricted to exactly
+// these variable names). Read by src/config/runtimeConfig.ts before the app
+// bundle boots — this is what lets one built image serve different OIDC
+// issuers/clients per environment without a rebuild.
+window.__APP_CONFIG__ = {
+  OIDC_ISSUER_URL: "${VITE_OIDC_ISSUER_URL}",
+  OIDC_CLIENT_ID: "${VITE_OIDC_CLIENT_ID}",
+  OIDC_REDIRECT_URI: "${VITE_OIDC_REDIRECT_URI}",
+  OIDC_POST_LOGOUT_REDIRECT_URI: "${VITE_OIDC_POST_LOGOUT_REDIRECT_URI}",
+  OIDC_SCOPE: "${VITE_OIDC_SCOPE}",
+  AUTH_BYPASS: "${VITE_AUTH_BYPASS}"
+};

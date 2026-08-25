@@ -1,4 +1,4 @@
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { keepPreviousData, useInfiniteQuery, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { apiClient } from "./client";
 import type {
   AnalysisMode,
@@ -11,14 +11,16 @@ import type {
   AssignmentHistoryItem,
   CalculationDetail,
   ChiefDetail,
+  ChiefForemanComparison,
   ChiefForemanItem,
   ChiefListItem,
   ContributionSummary,
   ContributionWorkCreatePayload,
   ContributionWorkItem,
   ContributionWorkUpdatePayload,
+  CursorPage,
+  DashboardSnapshot,
   DashboardSummary,
-  DistributionItem,
   FilterOptionsResponse,
   ForemanContributionSummary,
   ForemanDetail,
@@ -30,9 +32,12 @@ import type {
   MonthlyReportDetail,
   MonthlyReportLatest,
   MonthlyReportSummary,
-  PagedResponse,
+  PlantDetail,
+  PlantForemanItem,
   PlantListItem,
   PlantRankingItem,
+  PlantShiftItem,
+  PlantSummary,
   ReportExportMeta,
   ReportFormat,
   ReportType,
@@ -45,6 +50,10 @@ import type {
 } from "./types";
 
 type Params = Record<string, string | number | undefined>;
+
+function nextCursorParam(lastPage: CursorPage<unknown>): string | undefined {
+  return lastPage.pagination.hasMore ? (lastPage.pagination.nextCursor ?? undefined) : undefined;
+}
 
 export function useFilterOptions(plantIds?: string, factoryIds?: string) {
   return useQuery({
@@ -65,6 +74,13 @@ export function useDashboardSummary(params: Params) {
   });
 }
 
+export function useDashboardSnapshot(params: Params) {
+  return useQuery({
+    queryKey: ["dashboard", "snapshot", params],
+    queryFn: async () => (await apiClient.get<DashboardSnapshot>("/dashboard/snapshot", { params })).data,
+  });
+}
+
 export function useDashboardTrend(params: Params, granularity: string) {
   return useQuery({
     queryKey: ["dashboard", "trend", params, granularity],
@@ -73,10 +89,11 @@ export function useDashboardTrend(params: Params, granularity: string) {
   });
 }
 
-export function useKpiSummary(params: Params) {
+export function useKpiSummary(params: Params, enabled = true) {
   return useQuery({
+    enabled,
     queryKey: ["dashboard", "kpi-summary", params],
-    queryFn: async () => (await apiClient.get<{ items: KpiSummaryItem[] }>("/dashboard/kpi-summary", { params })).data,
+    queryFn: async () => (await apiClient.get<KpiSummaryItem[]>("/dashboard/kpi-summary", { params })).data,
   });
 }
 
@@ -84,14 +101,14 @@ export function usePlantRanking(params: Params, order: "asc" | "desc", limit: nu
   return useQuery({
     queryKey: ["dashboard", "plant-ranking", params, order, limit],
     queryFn: async () =>
-      (await apiClient.get<{ items: PlantRankingItem[] }>("/dashboard/plant-ranking", { params: { ...params, order, limit } })).data,
+      (await apiClient.get<PlantRankingItem[]>("/dashboard/plant-ranking", { params: { ...params, order, limit } })).data,
   });
 }
 
 export function useShiftComparison(params: Params) {
   return useQuery({
     queryKey: ["dashboard", "shift-comparison", params],
-    queryFn: async () => (await apiClient.get<{ items: ShiftComparisonItem[] }>("/dashboard/shift-comparison", { params })).data,
+    queryFn: async () => (await apiClient.get<ShiftComparisonItem[]>("/dashboard/shift-comparison", { params })).data,
   });
 }
 
@@ -99,7 +116,7 @@ export function useForemanRanking(params: Params, order: "asc" | "desc", limit: 
   return useQuery({
     queryKey: ["dashboard", "foreman-ranking", params, order, limit],
     queryFn: async () =>
-      (await apiClient.get<{ items: import("./types").ForemanRankingItem[] }>("/dashboard/foreman-ranking", { params: { ...params, order, limit } })).data,
+      (await apiClient.get<import("./types").ForemanRankingItem[]>("/dashboard/foreman-ranking", { params: { ...params, order, limit } })).data,
   });
 }
 
@@ -107,21 +124,34 @@ export function useForemanTrendRanking(params: Params, direction: "improving" | 
   return useQuery({
     queryKey: ["dashboard", "foreman-trend-ranking", params, direction, limit],
     queryFn: async () =>
-      (await apiClient.get<{ items: import("./types").ForemanTrendRankingItem[] }>("/dashboard/foreman-trend-ranking", { params: { ...params, direction, limit } })).data,
+      (await apiClient.get<import("./types").ForemanTrendRankingItem[]>("/dashboard/foreman-trend-ranking", { params: { ...params, direction, limit } })).data,
+  });
+}
+
+export function usePerformanceLeaders() {
+  return useQuery({
+    queryKey: ["dashboard", "performance-leaders"],
+    queryFn: async () =>
+      (await apiClient.get<import("./types").PerformanceLeadersResponse>("/dashboard/performance-leaders")).data,
+    staleTime: 5 * 60 * 1000,
   });
 }
 
 export function usePerformanceDistribution(params: Params) {
   return useQuery({
     queryKey: ["dashboard", "distribution", params],
-    queryFn: async () => (await apiClient.get<{ items: DistributionItem[] }>("/dashboard/performance-distribution", { params })).data,
+    queryFn: async () =>
+      (await apiClient.get<import("./types").PerformanceDistributionResponse>("/dashboard/performance-distribution", { params })).data,
   });
 }
 
-export function usePlants(params: Params) {
-  return useQuery({
-    queryKey: ["plants", params],
-    queryFn: async () => (await apiClient.get<PagedResponse<PlantListItem>>("/plants", { params })).data,
+export function usePlants(filters: Params, limit = 25) {
+  return useInfiniteQuery({
+    queryKey: ["plants", filters, limit],
+    queryFn: async ({ pageParam }: { pageParam?: string }) =>
+      (await apiClient.get<CursorPage<PlantListItem>>("/plants", { params: { ...filters, limit, cursor: pageParam } })).data,
+    initialPageParam: undefined as string | undefined,
+    getNextPageParam: nextCursorParam,
   });
 }
 
@@ -129,7 +159,7 @@ export function usePlantDetail(plantId: string | undefined) {
   return useQuery({
     enabled: !!plantId,
     queryKey: ["plants", plantId],
-    queryFn: async () => (await apiClient.get(`/plants/${plantId}`)).data,
+    queryFn: async () => (await apiClient.get<PlantDetail>(`/plants/${plantId}`)).data,
   });
 }
 
@@ -137,7 +167,7 @@ export function usePlantSummary(plantId: string | undefined, params: Params) {
   return useQuery({
     enabled: !!plantId,
     queryKey: ["plants", plantId, "summary", params],
-    queryFn: async () => (await apiClient.get(`/plants/${plantId}/summary`, { params })).data,
+    queryFn: async () => (await apiClient.get<PlantSummary>(`/plants/${plantId}/summary`, { params })).data,
   });
 }
 
@@ -145,7 +175,7 @@ export function usePlantKpis(plantId: string | undefined, params: Params) {
   return useQuery({
     enabled: !!plantId,
     queryKey: ["plants", plantId, "kpis", params],
-    queryFn: async () => (await apiClient.get<{ items: KpiSummaryItem[] }>(`/plants/${plantId}/kpis`, { params })).data,
+    queryFn: async () => (await apiClient.get<KpiSummaryItem[]>(`/plants/${plantId}/kpis`, { params })).data,
   });
 }
 
@@ -153,15 +183,22 @@ export function usePlantShifts(plantId: string | undefined, params: Params) {
   return useQuery({
     enabled: !!plantId,
     queryKey: ["plants", plantId, "shifts", params],
-    queryFn: async () => (await apiClient.get<{ items: ShiftComparisonItem[] }>(`/plants/${plantId}/shifts`, { params })).data,
+    queryFn: async () => (await apiClient.get<PlantShiftItem[]>(`/plants/${plantId}/shifts`, { params })).data,
   });
 }
 
-export function usePlantForemen(plantId: string | undefined, params: Params) {
-  return useQuery({
+export function usePlantForemen(plantId: string | undefined, filters: Params, limit = 25) {
+  return useInfiniteQuery({
     enabled: !!plantId,
-    queryKey: ["plants", plantId, "foremen", params],
-    queryFn: async () => (await apiClient.get<PagedResponse<import("./types").ForemanRankingItem>>(`/plants/${plantId}/foremen`, { params })).data,
+    queryKey: ["plants", plantId, "foremen", filters, limit],
+    queryFn: async ({ pageParam }: { pageParam?: string }) =>
+      (
+        await apiClient.get<CursorPage<PlantForemanItem>>(`/plants/${plantId}/foremen`, {
+          params: { ...filters, limit, cursor: pageParam },
+        })
+      ).data,
+    initialPageParam: undefined as string | undefined,
+    getNextPageParam: nextCursorParam,
   });
 }
 
@@ -169,14 +206,17 @@ export function usePlantChiefs(plantId: string | undefined, params: Params) {
   return useQuery({
     enabled: !!plantId,
     queryKey: ["plants", plantId, "chiefs", params],
-    queryFn: async () => (await apiClient.get<{ items: import("./types").PlantChiefItem[] }>(`/plants/${plantId}/chiefs`, { params })).data,
+    queryFn: async () => (await apiClient.get<import("./types").PlantChiefItem[]>(`/plants/${plantId}/chiefs`, { params })).data,
   });
 }
 
-export function useForemen(params: Params) {
-  return useQuery({
-    queryKey: ["foremen", params],
-    queryFn: async () => (await apiClient.get<PagedResponse<ForemanListItem>>("/foremen", { params })).data,
+export function useForemen(filters: Params, limit = 25) {
+  return useInfiniteQuery({
+    queryKey: ["foremen", filters, limit],
+    queryFn: async ({ pageParam }: { pageParam?: string }) =>
+      (await apiClient.get<CursorPage<ForemanListItem>>("/foremen", { params: { ...filters, limit, cursor: pageParam } })).data,
+    initialPageParam: undefined as string | undefined,
+    getNextPageParam: nextCursorParam,
   });
 }
 
@@ -185,7 +225,7 @@ export function useForemenByIds(ids: string[]) {
     enabled: ids.length > 0,
     queryKey: ["foremen", "by-ids", ids],
     queryFn: async () =>
-      (await apiClient.get<PagedResponse<ForemanListItem>>("/foremen", { params: { ids: ids.join(","), page_size: Math.max(ids.length, 1) } })).data,
+      (await apiClient.get<CursorPage<ForemanListItem>>("/foremen", { params: { ids: ids.join(","), limit: Math.max(ids.length, 1) } })).data,
   });
 }
 
@@ -201,7 +241,7 @@ export function useForemanKpis(foremanId: string | undefined, params: Params) {
   return useQuery({
     enabled: !!foremanId,
     queryKey: ["foremen", foremanId, "kpis", params],
-    queryFn: async () => (await apiClient.get<{ items: ForemanKpiItem[] }>(`/foremen/${foremanId}/kpis`, { params })).data,
+    queryFn: async () => (await apiClient.get<ForemanKpiItem[]>(`/foremen/${foremanId}/kpis`, { params })).data,
   });
 }
 
@@ -226,7 +266,7 @@ export function useForemanAssignmentHistory(foremanId: string | undefined) {
   return useQuery({
     enabled: !!foremanId,
     queryKey: ["foremen", foremanId, "assignment-history"],
-    queryFn: async () => (await apiClient.get<{ items: AssignmentHistoryItem[] }>(`/foremen/${foremanId}/assignment-history`)).data,
+    queryFn: async () => (await apiClient.get<AssignmentHistoryItem[]>(`/foremen/${foremanId}/assignment-history`)).data,
   });
 }
 
@@ -244,7 +284,7 @@ export function useForemanMonthlyReports(foremanId: string | undefined) {
     enabled: !!foremanId,
     queryKey: ["foremen", foremanId, "monthly-reports"],
     queryFn: async () =>
-      (await apiClient.get<{ items: MonthlyReportSummary[] }>(`/foremen/${foremanId}/monthly-reports`)).data,
+      (await apiClient.get<MonthlyReportSummary[]>(`/foremen/${foremanId}/monthly-reports`)).data,
   });
 }
 
@@ -272,17 +312,20 @@ export function useForemanRecentContributions(foremanId: string | undefined, ena
     queryKey: ["foremen", foremanId, "contributions", "recent"],
     queryFn: async () =>
       (
-        await apiClient.get<PagedResponse<ContributionWorkItem>>("/contribution-works", {
-          params: { foreman_ids: foremanId, status: "published", page: 1, page_size: 3 },
+        await apiClient.get<CursorPage<ContributionWorkItem>>("/contribution-works", {
+          params: { foreman_ids: foremanId, status: "published", limit: 3 },
         })
       ).data,
   });
 }
 
-export function useChiefs(params: Params) {
-  return useQuery({
-    queryKey: ["chiefs", params],
-    queryFn: async () => (await apiClient.get<PagedResponse<ChiefListItem>>("/chiefs", { params })).data,
+export function useChiefs(filters: Params, limit = 25) {
+  return useInfiniteQuery({
+    queryKey: ["chiefs", filters, limit],
+    queryFn: async ({ pageParam }: { pageParam?: string }) =>
+      (await apiClient.get<CursorPage<ChiefListItem>>("/chiefs", { params: { ...filters, limit, cursor: pageParam } })).data,
+    initialPageParam: undefined as string | undefined,
+    getNextPageParam: nextCursorParam,
   });
 }
 
@@ -298,7 +341,7 @@ export function useChiefForemen(chiefId: string | undefined, params: Params) {
   return useQuery({
     enabled: !!chiefId,
     queryKey: ["chiefs", chiefId, "foremen", params],
-    queryFn: async () => (await apiClient.get<{ items: ChiefForemanItem[] }>(`/chiefs/${chiefId}/foremen`, { params })).data,
+    queryFn: async () => (await apiClient.get<ChiefForemanItem[]>(`/chiefs/${chiefId}/foremen`, { params })).data,
   });
 }
 
@@ -306,7 +349,15 @@ export function useChiefKpis(chiefId: string | undefined, params: Params) {
   return useQuery({
     enabled: !!chiefId,
     queryKey: ["chiefs", chiefId, "kpis", params],
-    queryFn: async () => (await apiClient.get<{ items: ForemanKpiItem[] }>(`/chiefs/${chiefId}/kpis`, { params })).data,
+    queryFn: async () => (await apiClient.get<ForemanKpiItem[]>(`/chiefs/${chiefId}/kpis`, { params })).data,
+  });
+}
+
+export function useChiefForemanComparison(chiefId: string | undefined, params: Params) {
+  return useQuery({
+    enabled: !!chiefId,
+    queryKey: ["chiefs", chiefId, "foreman-comparison", params],
+    queryFn: async () => (await apiClient.get<ChiefForemanComparison>(`/chiefs/${chiefId}/foreman-comparison`, { params })).data,
   });
 }
 
@@ -322,7 +373,7 @@ export function useChiefTrend(chiefId: string | undefined, params: Params, granu
 export function useKpis() {
   return useQuery({
     queryKey: ["kpis"],
-    queryFn: async () => (await apiClient.get<{ items: KpiListItem[] }>("/kpis")).data,
+    queryFn: async () => (await apiClient.get<KpiListItem[]>("/kpis")).data,
   });
 }
 
@@ -335,10 +386,13 @@ export function useKpiAnalysis(kpiId: string | undefined, params: Params) {
 }
 
 
-export function useReportHistory(params: Params) {
-  return useQuery({
-    queryKey: ["reports", params],
-    queryFn: async () => (await apiClient.get<PagedResponse<ReportExportMeta>>("/reports", { params })).data,
+export function useReportHistory(limit = 25) {
+  return useInfiniteQuery({
+    queryKey: ["reports", limit],
+    queryFn: async ({ pageParam }: { pageParam?: string }) =>
+      (await apiClient.get<CursorPage<ReportExportMeta>>("/reports", { params: { limit, cursor: pageParam } })).data,
+    initialPageParam: undefined as string | undefined,
+    getNextPageParam: nextCursorParam,
   });
 }
 
@@ -346,9 +400,9 @@ export function useGenerateReport() {
   const queryClient = useQueryClient();
   return useMutation({
     mutationFn: async (payload: {
-      report_type: ReportType; format: ReportFormat;
-      date_from?: string; date_to?: string;
-      plant_ids?: string[]; factory_ids?: string[]; chief_ids?: string[]; shift_ids?: string[]; kpi_ids?: string[];
+      reportType: ReportType; format: ReportFormat;
+      dateFrom?: string; dateTo?: string;
+      plantIds?: string[]; factoryIds?: string[]; chiefIds?: string[]; shiftIds?: string[]; kpiIds?: string[];
     }) => (await apiClient.post<ReportExportMeta>("/reports/generate", payload)).data,
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["reports"] });
@@ -360,10 +414,17 @@ export function downloadReportUrl(reportId: string): string {
   return `/api/v1/reports/${reportId}/download`;
 }
 
-export function useContributionWorks(params: Params) {
-  return useQuery({
-    queryKey: ["contribution-works", params],
-    queryFn: async () => (await apiClient.get<PagedResponse<ContributionWorkItem>>("/contribution-works", { params })).data,
+export function useContributionWorks(filters: Params, limit = 25) {
+  return useInfiniteQuery({
+    queryKey: ["contribution-works", filters, limit],
+    queryFn: async ({ pageParam }: { pageParam?: string }) =>
+      (
+        await apiClient.get<CursorPage<ContributionWorkItem>>("/contribution-works", {
+          params: { ...filters, limit, cursor: pageParam },
+        })
+      ).data,
+    initialPageParam: undefined as string | undefined,
+    getNextPageParam: nextCursorParam,
   });
 }
 
@@ -417,10 +478,13 @@ export function useContributionSummary(params: Params = {}) {
 }
 
 
-export function useAnomalies(params: Params) {
-  return useQuery({
-    queryKey: ["anomalies", params],
-    queryFn: async () => (await apiClient.get<PagedResponse<AnomalyListItem>>("/anomalies", { params })).data,
+export function useAnomalies(filters: Params, limit = 25) {
+  return useInfiniteQuery({
+    queryKey: ["anomalies", filters, limit],
+    queryFn: async ({ pageParam }: { pageParam?: string }) =>
+      (await apiClient.get<CursorPage<AnomalyListItem>>("/anomalies", { params: { ...filters, limit, cursor: pageParam } })).data,
+    initialPageParam: undefined as string | undefined,
+    getNextPageParam: nextCursorParam,
   });
 }
 
@@ -442,7 +506,7 @@ export function useAnomaly(id: string | undefined) {
 export interface AnalyzeAnomalyPayload {
   id: string;
   mode?: AnalysisMode;
-  force_refresh?: boolean;
+  forceRefresh?: boolean;
 }
 
 export function useAnalyzeAnomaly() {
@@ -490,7 +554,7 @@ export function useAnalysisToolCalls(analysisId: string | undefined) {
   return useQuery({
     queryKey: ["analyses", analysisId, "tool-calls"],
     queryFn: async () =>
-      (await apiClient.get<{ items: AnomalyToolCallItem[]; total: number }>(`/analyses/${analysisId}/tool-calls`)).data,
+      (await apiClient.get<AnomalyToolCallItem[]>(`/analyses/${analysisId}/tool-calls`)).data,
     enabled: !!analysisId,
   });
 }
@@ -508,6 +572,7 @@ export function useShiftAnalysisDetail(params: { plant_id?: string; shift_id?: s
     queryKey: ["shift-analysis", "detail", params],
     queryFn: async () => (await apiClient.get<ShiftAnomalyDetail>("/shift-analysis/detail", { params })).data,
     enabled: !!(params.plant_id && params.shift_id && params.kpi_id),
+    placeholderData: keepPreviousData,
   });
 }
 

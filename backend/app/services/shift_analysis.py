@@ -225,7 +225,7 @@ def build_heatmap(
     db: Session, month_start: date, month_end: date, *,
     plant_ids: list[UUID] | None = None, factory_ids: list[UUID] | None = None,
     kpi_ids: list[UUID] | None = None, thresholds: ShiftAnomalyThresholds = DEFAULT_THRESHOLDS,
-) -> tuple[list[HeatmapPlantRef], list[HeatmapKpiRef], list[HeatmapCell]]:
+) -> tuple[list[HeatmapPlantRef], list[HeatmapKpiRef], list[HeatmapCell], list[Shift]]:
     rows = _fetch_raw_rows(db, month_start, month_end, plant_ids=plant_ids, factory_ids=factory_ids, kpi_ids=kpi_ids)
 
     shifts_by_id = {s.id: s for s in db.scalars(select(Shift))}
@@ -281,7 +281,7 @@ def build_heatmap(
                 )
             )
 
-    return plant_refs, kpi_refs, cells
+    return plant_refs, kpi_refs, cells, ordered_shifts
 
 
 @dataclass
@@ -510,6 +510,7 @@ class ShiftAnomalyCard:
     kpi_code: str
     kpi_name: str
     kpi_unit: str
+    kpi_decimal_places: int
     success_direction_higher: bool
     severity: str
     title: str
@@ -578,6 +579,7 @@ def build_cards(
                 factory_id=plant.factory_id, factory_code=factory.code if factory else "",
                 shift_id=shift_id, shift_name=shift.name,
                 kpi_id=kpi_id, kpi_code=kpi.code, kpi_name=kpi.name, kpi_unit=kpi.unit,
+                kpi_decimal_places=kpi.decimal_places,
                 success_direction_higher=kpi.success_direction_higher,
                 severity=comparison.severity,
                 title=_build_title(worse_named.name, better_named.name, shift.name, kpi.name),
@@ -628,30 +630,100 @@ def build_summary(cards: list[ShiftAnomalyCard], month_start: date, month_end: d
     )
 
 
-def _weekly_breakdown(records_by_foreman: dict[UUID, list[_RawRow]], foreman_ids: set[UUID]) -> list[dict]:
-    relevant = {fid: recs for fid, recs in records_by_foreman.items() if fid in foreman_ids}
-    all_weeks = sorted({_week_index(r.performance_date) for recs in relevant.values() for r in recs})
-    ordinal = {w: i + 1 for i, w in enumerate(all_weeks)}
+def _month_week_indices(month_start: date, month_end: date) -> list[int]:
+    n_days = (month_end - month_start).days + 1
+    return sorted({_week_index(month_start + timedelta(days=i)) for i in range(n_days)})
 
-    out = []
-    for foreman_id, recs in relevant.items():
-        by_week: dict[int, list[_RawRow]] = defaultdict(list)
-        for r in recs:
-            by_week[_week_index(r.performance_date)].append(r)
-        for w, week_records in by_week.items():
-            denom = sum(x.denominator for x in week_records)
-            numer = sum(x.numerator for x in week_records)
-            out.append(
-                {
-                    "week_index": ordinal[w],
-                    "week_label": f"Hafta {ordinal[w]}",
-                    "foreman_id": foreman_id,
-                    "avg_actual": (numer / denom * 100.0) if denom else 0.0,
-                    "day_count": len(week_records),
-                }
-            )
-    out.sort(key=lambda x: (x["week_index"], str(x["foreman_id"])))
+
+def _foreman_week_values(records: list[_RawRow]) -> dict[int, tuple[float, int, UUID]]:
+    by_week: dict[int, list[_RawRow]] = defaultdict(list)
+    for r in records:
+        by_week[_week_index(r.performance_date)].append(r)
+    out: dict[int, tuple[float, int, UUID]] = {}
+    for week_index, recs in by_week.items():
+        denom = sum(x.denominator for x in recs)
+        if denom == 0:
+            continue
+        numer = sum(x.numerator for x in recs)
+        out[week_index] = (numer / denom * 100.0, len(recs), recs[0].shift_id)
     return out
+
+
+def _fetch_assigned_week_indices(
+    db: Session, month_start: date, month_end: date, plant_id: UUID, foreman_ids: set[UUID],
+) -> dict[UUID, dict[int, UUID]]:
+    """Bir formenin o hafta bu tesiste fiilen hangi vardiyada görevli olduğunu belirler.
+
+    KPI veya veri kalitesi durumundan bağımsız olarak — herhangi bir KPI için herhangi bir
+    kalite durumunda kayıt varlığı, ingestion pipeline'ının o formeni o gün bu tesiste fiilen
+    çalışıyor kabul ettiği anlamına gelir. Vardiya filtrelenmez: formenin haftalık rotasyonu
+    hangi vardiyaya denk gelirse gelsin, o haftaki fiili görev/vardiya buradan okunur. Bu,
+    "görevli değil" ile "görevli ama bu KPI için yeterli veri yok" durumlarını ayırt etmek
+    için kullanılır.
+    """
+    stmt = select(PerformanceRecord.foreman_id, PerformanceRecord.performance_date, PerformanceRecord.shift_id).where(
+        PerformanceRecord.plant_id == plant_id,
+        PerformanceRecord.foreman_id.in_(foreman_ids),
+        PerformanceRecord.performance_date >= month_start,
+        PerformanceRecord.performance_date <= month_end,
+    ).distinct()
+    out: dict[UUID, dict[int, UUID]] = defaultdict(dict)
+    for foreman_id, perf_date, shift_id in db.execute(stmt).all():
+        out[foreman_id][_week_index(perf_date)] = shift_id
+    return out
+
+
+@dataclass
+class WeeklyForemanPoint:
+    assigned: bool
+    value: float | None
+    day_count: int
+    has_sufficient_data: bool
+    shift_id: UUID | None = None
+    shift_name: str | None = None
+
+
+@dataclass
+class ShiftWeeklyComparisonPoint:
+    week_index: int
+    week_label: str
+    better: WeeklyForemanPoint
+    worse: WeeklyForemanPoint
+
+
+def _weekly_comparison(
+    month_start: date, month_end: date, assigned_weeks: dict[UUID, dict[int, UUID]],
+    better_id: UUID, better_values: dict[int, tuple[float, int, UUID]],
+    worse_id: UUID, worse_values: dict[int, tuple[float, int, UUID]],
+    shifts_by_id: dict[UUID, Shift],
+) -> list[ShiftWeeklyComparisonPoint]:
+    def point_for(foreman_id: UUID, week_index: int, values: dict[int, tuple[float, int, UUID]]) -> WeeklyForemanPoint:
+        if week_index in values:
+            value, day_count, shift_id = values[week_index]
+            shift = shifts_by_id.get(shift_id)
+            return WeeklyForemanPoint(
+                assigned=True, value=value, day_count=day_count, has_sufficient_data=True,
+                shift_id=shift_id, shift_name=shift.name if shift else None,
+            )
+        week_shift_id = assigned_weeks.get(foreman_id, {}).get(week_index)
+        if week_shift_id is not None:
+            shift = shifts_by_id.get(week_shift_id)
+            return WeeklyForemanPoint(
+                assigned=True, value=None, day_count=0, has_sufficient_data=False,
+                shift_id=week_shift_id, shift_name=shift.name if shift else None,
+            )
+        return WeeklyForemanPoint(assigned=False, value=None, day_count=0, has_sufficient_data=False)
+
+    week_indices = _month_week_indices(month_start, month_end)
+    ordinal = {w: i + 1 for i, w in enumerate(week_indices)}
+    return [
+        ShiftWeeklyComparisonPoint(
+            week_index=ordinal[w], week_label=f"Hafta {ordinal[w]}",
+            better=point_for(better_id, w, better_values),
+            worse=point_for(worse_id, w, worse_values),
+        )
+        for w in week_indices
+    ]
 
 
 def _is_consistent_pattern(weekly_points: list[dict], better_id: UUID, worse_id: UUID, higher_is_better: bool) -> bool:
@@ -707,42 +779,74 @@ def _cross_kpi_signals(
     return signals
 
 
+_GENITIVE_SUFFIX_BY_VOWEL = {
+    "a": "ın", "ı": "ın", "A": "ın", "I": "ın",
+    "e": "in", "i": "in", "E": "in", "İ": "in",
+    "o": "un", "u": "un", "O": "un", "U": "un",
+    "ö": "ün", "ü": "ün", "Ö": "ün", "Ü": "ün",
+}
+_TURKISH_VOWELS = set(_GENITIVE_SUFFIX_BY_VOWEL)
+
+
+def _possessive_form(name: str) -> str:
+    """Bir kişi adına Türkçe iyelik eki ekler — büyük ünlü uyumuna göre 'ın/'in/'un/'ün seçer.
+
+    Örn. "Ali Öztürk" -> "Ali Öztürk'ün", "Volkan Aslan" -> "Volkan Aslan'ın". Sabit bir ek
+    (örn. her zaman "'ün") kullanmak isim setine göre yanlış sonuç üretir; bu yüzden adın son
+    ünlüsüne bakılır. Ad bir ünlüyle bitiyorsa araya kaynaştırma "n" harfi eklenir.
+    """
+    last_vowel = next((ch for ch in reversed(name) if ch in _TURKISH_VOWELS), None)
+    if last_vowel is None:
+        return f"{name}'in"
+    suffix = _GENITIVE_SUFFIX_BY_VOWEL[last_vowel]
+    buffer = "n" if name[-1] in _TURKISH_VOWELS else ""
+    return f"{name}'{buffer}{suffix}"
+
+
 def _build_pattern_commentary(
     *, kpi_name: str, worse_name: str, better_name: str, is_consistent: bool, has_enough_weeks: bool,
     cross_kpi_signals: list[CrossKpiSignal],
-) -> str:
+) -> tuple[str, str]:
     if not has_enough_weeks:
-        parts = [
-            "Bu karşılaştırma sınırlı sayıda hafta verisine dayanmaktadır; farkın kalıcı bir örüntü mü "
-            "yoksa tek seferlik bir sapma mı olduğu bu ayın verisiyle netleştirilemedi."
-        ]
+        headline = "Sınırlı veri — örüntü netleştirilemedi."
+        detail = (
+            "Bu karşılaştırma az sayıda haftaya dayanıyor; farkın kalıcı bir örüntü mü yoksa tek seferlik "
+            "bir sapma mı olduğu bu ayın verisiyle netleşmiyor."
+        )
     elif is_consistent:
-        parts = [
-            f"Bu fark tek haftalık bir sapmadan ziyade ay içinde tekrarlayan bir örüntü göstermektedir. "
-            f"Aynı tesiste aynı vardiyada {worse_name} ile {better_name} arasında {kpi_name} KPI'ında görülen "
-            f"bu fark dönem boyunca sürmektedir; {worse_name} sonuçları daha düşük seyretmektedir."
-        ]
+        headline = "Fark ay boyunca tekrar ediyor."
+        detail = (
+            f"{_possessive_form(worse_name)} görev aldığı haftalarda {kpi_name}, {_possessive_form(better_name)} "
+            f"görev aldığı haftalara göre belirgin şekilde farklı seyrediyor."
+        )
     else:
-        parts = [
-            "Bu fark ay geneline yayılmış tutarlı bir örüntüden ziyade belirli haftalarda yoğunlaşan bir "
-            "sapma olabilir; haftalık kırılıma bakılması önerilir."
-        ]
+        headline = "Fark haftalara göre değişkenlik gösteriyor."
+        detail = (
+            "Ay geneline yayılmış tutarlı bir örüntüden ziyade belirli haftalarda yoğunlaşan bir sapma olabilir; "
+            "haftalık kırılıma bakılması önerilir."
+        )
 
     signal_names = [s.kpi_name for s in cross_kpi_signals]
     if signal_names:
         joined = ", ".join(signal_names)
-        parts.append(f"Aynı formen çifti arasında benzer yönde bir fark {joined} KPI'ında da gözlemlenmektedir.")
+        count = len(signal_names)
+        detail += (
+            f" Aynı formen çifti arasında {count} farklı KPI'da ({joined}) da anlamlı fark bulunuyor; bu durum "
+            f"tekrarlayan bir performans örüntüsüne işaret ediyor. Ek operasyonel inceleme önerilir."
+        )
     else:
-        parts.append(f"Bu fark yalnızca {kpi_name} KPI'ında gözlemlenmektedir; diğer KPI'larda benzer bir sapma tespit edilmedi.")
+        detail += f" Bu fark yalnızca {kpi_name} KPI'ında gözlemleniyor; diğer KPI'larda benzer bir sapma tespit edilmedi."
 
-    return " ".join(parts)
+    return headline, detail
 
 
 @dataclass
 class ShiftAnomalyDetail(ShiftAnomalyCard):
-    weekly_breakdown: list[dict] = field(default_factory=list)
+    reference_target: float = 0.0
+    weekly_comparison: list[ShiftWeeklyComparisonPoint] = field(default_factory=list)
     cross_kpi_signals: list[CrossKpiSignal] = field(default_factory=list)
-    pattern_commentary: str = ""
+    pattern_headline: str = ""
+    pattern_detail: str = ""
     is_recurring_pattern: bool = False
 
 
@@ -788,17 +892,42 @@ def build_detail(
     worse_named = _named(comparison.worse, worse_f)
     period_label = month_label(month_end)
 
-    weekly_points = _weekly_breakdown(by_kpi[kpi_id], {better_id, worse_id})
+    all_shift_rows = _fetch_raw_rows(db, month_start, month_end, plant_ids=[plant_id], kpi_ids=[kpi_id])
+    by_foreman_any_shift: dict[UUID, list[_RawRow]] = defaultdict(list)
+    for r in all_shift_rows:
+        if r.foreman_id in (better_id, worse_id):
+            by_foreman_any_shift[r.foreman_id].append(r)
+
+    better_week_values = _foreman_week_values(by_foreman_any_shift.get(better_id, []))
+    worse_week_values = _foreman_week_values(by_foreman_any_shift.get(worse_id, []))
+    assigned_weeks = _fetch_assigned_week_indices(db, month_start, month_end, plant_id, {better_id, worse_id})
+    shifts_by_id = {s.id: s for s in db.scalars(select(Shift))}
+    weekly_comparison = _weekly_comparison(
+        month_start, month_end, assigned_weeks,
+        better_id, better_week_values, worse_id, worse_week_values, shifts_by_id,
+    )
+
+    flat_points = [{"foreman_id": better_id, "avg_actual": v} for v, _, _ in better_week_values.values()] + [
+        {"foreman_id": worse_id, "avg_actual": v} for v, _, _ in worse_week_values.values()
+    ]
     has_enough_weeks = comparison.better.week_indices and comparison.worse.week_indices and (
         len(comparison.better.week_indices) >= 2 or len(comparison.worse.week_indices) >= 2
     )
     is_consistent = has_enough_weeks and _is_consistent_pattern(
-        weekly_points, better_id, worse_id, kpi.success_direction_higher
+        flat_points, better_id, worse_id, kpi.success_direction_higher
     )
     signals = _cross_kpi_signals(by_kpi, kpi_id, better_id, worse_id, kpis_by_id, thresholds)
-    commentary = _build_pattern_commentary(
+    pattern_headline, pattern_detail = _build_pattern_commentary(
         kpi_name=kpi.name, worse_name=worse_named.name, better_name=better_named.name,
         is_consistent=is_consistent, has_enough_weeks=bool(has_enough_weeks), cross_kpi_signals=signals,
+    )
+
+    target_filters = Filters(date_from=month_start, date_to=month_end, plant_ids=[plant_id], kpi_ids=[kpi_id])
+    target_summary = analytics.kpi_summary(db, target_filters)
+    reference_target = (
+        target_summary[0].avg_target
+        if target_summary and target_summary[0].avg_target is not None
+        else float(kpi.default_target_value)
     )
 
     return ShiftAnomalyDetail(
@@ -806,6 +935,7 @@ def build_detail(
         factory_id=plant.factory_id, factory_code=factory.code if factory else "",
         shift_id=shift_id, shift_name=shift.name,
         kpi_id=kpi_id, kpi_code=kpi.code, kpi_name=kpi.name, kpi_unit=kpi.unit,
+        kpi_decimal_places=kpi.decimal_places,
         success_direction_higher=kpi.success_direction_higher,
         severity=comparison.severity,
         title=_build_title(worse_named.name, better_named.name, shift.name, kpi.name),
@@ -813,6 +943,6 @@ def build_detail(
         abs_diff=comparison.abs_diff, pct_diff=comparison.pct_diff,
         compared_weeks=len(set(comparison.better.week_indices) | set(comparison.worse.week_indices)),
         month_start=month_start, month_end=month_end, period_label=period_label,
-        weekly_breakdown=weekly_points, cross_kpi_signals=signals,
-        pattern_commentary=commentary, is_recurring_pattern=is_consistent,
+        reference_target=reference_target, weekly_comparison=weekly_comparison, cross_kpi_signals=signals,
+        pattern_headline=pattern_headline, pattern_detail=pattern_detail, is_recurring_pattern=is_consistent,
     )

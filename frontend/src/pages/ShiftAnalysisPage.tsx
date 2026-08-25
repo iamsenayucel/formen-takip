@@ -1,14 +1,18 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { AlertOctagon, CalendarRange, Factory, Gauge, SearchCheck, ShieldAlert, TrendingUp } from "lucide-react";
 import { useFilterOptions, useShiftAnalysisCards, useShiftHeatmap } from "../api/hooks";
 import { useShiftAnalysisFilters } from "../hooks/useShiftAnalysisFilters";
 import { Card, EmptyState, ErrorState, LoadingState } from "../components/StateViews";
+import { PageHeader } from "../components/PageHeader";
 import { ShiftAnomalyCard } from "../components/ShiftAnomalyCard";
 import { ShiftAnomalyDetailModal } from "../components/ShiftAnomalyDetailModal";
 import { ShiftAnomalyHeatmap } from "../components/ShiftAnomalyHeatmap";
 import { MultiSelect } from "../components/FilterBar";
+import { LoadMoreButton } from "../components/LoadMoreButton";
 import type { ShiftAnomalyCard as ShiftAnomalyCardData } from "../api/types";
 import { fieldClass, fieldStyle, labelClass, labelStyle } from "../lib/formStyles";
+
+const CARDS_PAGE_SIZE = 8;
 
 function SummaryTile({
   label, value, icon: Icon, accent,
@@ -16,13 +20,13 @@ function SummaryTile({
   return (
     <div
       className="rounded-lg p-4"
-      style={{ background: "var(--surface)", border: "1px solid var(--border)", borderTop: `2px solid ${accent ?? "var(--accent)"}` }}
+      style={{ background: "var(--surface)", border: "1px solid var(--border)", borderTop: `2px solid ${accent ?? "var(--primary)"}` }}
     >
       <div className="flex items-center gap-1.5">
         <Icon size={13} strokeWidth={2} style={{ color: accent ?? "var(--text-muted)" }} />
-        <p className="text-[11px] font-semibold uppercase tracking-wide" style={{ color: "var(--text-muted)" }}>{label}</p>
+        <p className="text-label" style={{ color: "var(--text-muted)" }}>{label}</p>
       </div>
-      <p className="mt-1.5 text-xl font-semibold tabular-nums" style={{ color: "var(--text-primary)" }}>{value}</p>
+      <p className="text-hero-metric mt-1.5" style={{ color: "var(--text-primary)" }}>{value}</p>
     </div>
   );
 }
@@ -30,10 +34,13 @@ function SummaryTile({
 export function ShiftAnalysisPage() {
   const { filters, setFilters, clearFilters, asQueryParams, activeFilterCount } = useShiftAnalysisFilters();
   const [selectedCard, setSelectedCard] = useState<ShiftAnomalyCardData | null>(null);
+  const [visibleCount, setVisibleCount] = useState(CARDS_PAGE_SIZE);
 
   const filterOptions = useFilterOptions();
   const cards = useShiftAnalysisCards(asQueryParams);
   const summary = cards.data?.summary;
+  const allCards = cards.data?.items ?? [];
+  const pagedCards = useMemo(() => allCards.slice(0, visibleCount), [allCards, visibleCount]);
 
   const heatmapParams = useMemo(
     () => ({ factory_ids: asQueryParams.factory_ids, plant_ids: asQueryParams.plant_ids, kpi_ids: asQueryParams.kpi_ids }),
@@ -42,16 +49,20 @@ export function ShiftAnalysisPage() {
   const heatmap = useShiftHeatmap(heatmapParams);
   const heatmapSummary = heatmap.data?.summary;
 
+  useEffect(() => {
+    setVisibleCount(CARDS_PAGE_SIZE);
+  }, [asQueryParams]);
+
   const plantsForFactory = useMemo(() => {
     const plants = filterOptions.data?.plants ?? [];
     if (filters.factoryIds.length === 0) return plants;
     const allowed = new Set(filters.factoryIds);
-    return plants.filter((p) => allowed.has(p.factory_id));
+    return plants.filter((p) => allowed.has(p.factoryId));
   }, [filterOptions.data, filters.factoryIds]);
 
   const handleFactoryChange = (ids: string[]) => {
     const allowed = new Set(ids);
-    const factoryIdByPlant = new Map((filterOptions.data?.plants ?? []).map((p) => [p.id, p.factory_id]));
+    const factoryIdByPlant = new Map((filterOptions.data?.plants ?? []).map((p) => [p.id, p.factoryId]));
     setFilters({
       factoryIds: ids,
       plantIds:
@@ -63,12 +74,7 @@ export function ShiftAnalysisPage() {
 
   return (
     <div className="flex flex-col gap-4">
-      <div>
-        <h2 className="text-lg font-semibold" style={{ color: "var(--text-primary)" }}>Vardiya Analizi</h2>
-        <p className="mt-0.5 text-sm" style={{ color: "var(--text-muted)" }}>
-          Bir önce tamamlanan ay içindeki vardiya bazlı anormal performans farklarını otomatik tespit eden analiz ekranı.
-        </p>
-      </div>
+      <PageHeader title="Vardiya Analizi" />
 
       <div className="flex flex-wrap items-end gap-2 rounded-lg p-3" style={{ background: "var(--surface)", border: "1px solid var(--border)" }}>
         <MultiSelect
@@ -125,10 +131,10 @@ export function ShiftAnalysisPage() {
 
       {heatmapSummary && (
         <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
-          <SummaryTile label="Anomali Tespit Edilen Tesis" value={String(heatmapSummary.anomaly_plant_count)} icon={Factory} accent="#1d4ed8" />
-          <SummaryTile label="Kritik Anomali Sayısı" value={String(heatmapSummary.critical_cell_count)} icon={AlertOctagon} accent="#b91c1c" />
-          <SummaryTile label="En Çok Sapma Görülen KPI" value={heatmapSummary.top_kpi?.name ?? "-"} icon={Gauge} accent="#7c3aed" />
-          <SummaryTile label="Öncelikli İncelenmesi Gereken Tesis" value={String(heatmapSummary.priority_plant_count)} icon={ShieldAlert} accent="#b45309" />
+          <SummaryTile label="Anomali Tespit Edilen Tesis" value={String(heatmapSummary.anomalyPlantCount)} icon={Factory} accent="var(--status-info)" />
+          <SummaryTile label="Kritik Anomali Sayısı" value={String(heatmapSummary.criticalCellCount)} icon={AlertOctagon} accent="var(--status-negative)" />
+          <SummaryTile label="En Çok Sapma Görülen KPI" value={heatmapSummary.topKpi?.name ?? "-"} icon={Gauge} accent="var(--primary)" />
+          <SummaryTile label="Öncelikli İncelenmesi Gereken Tesis" value={String(heatmapSummary.priorityPlantCount)} icon={ShieldAlert} accent="var(--status-neutral)" />
         </div>
       )}
 
@@ -136,19 +142,19 @@ export function ShiftAnalysisPage() {
 
       {summary && (
         <div>
-          <h3 className="mb-2 text-[13px] font-semibold uppercase tracking-wide" style={{ color: "var(--text-secondary)" }}>
+          <h3 className="text-section-title mb-2" style={{ color: "var(--text-secondary)" }}>
             Tespit Kartları
           </h3>
           <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 xl:grid-cols-5">
             <SummaryTile label="İncelenen Dönem" value={summary.period.label} icon={CalendarRange} />
-            <SummaryTile label="Toplam Tespit Edilen Anomali" value={String(summary.total_anomalies)} icon={SearchCheck} />
-            <SummaryTile label="En Çok Anomali Görülen Tesis" value={summary.top_plant?.name ?? "-"} icon={Factory} accent="#1d4ed8" />
-            <SummaryTile label="En Çok Anomali Görülen KPI" value={summary.top_kpi?.name ?? "-"} icon={Gauge} accent="#7c3aed" />
+            <SummaryTile label="Toplam Tespit Edilen Anomali" value={String(summary.totalAnomalies)} icon={SearchCheck} />
+            <SummaryTile label="En Çok Anomali Görülen Tesis" value={summary.topPlant?.name ?? "-"} icon={Factory} accent="var(--status-info)" />
+            <SummaryTile label="En Çok Anomali Görülen KPI" value={summary.topKpi?.name ?? "-"} icon={Gauge} accent="var(--primary)" />
             <SummaryTile
               label="En Yüksek Fark Oranı"
-              value={summary.max_pct_diff !== null ? `%${summary.max_pct_diff.toFixed(1)}` : "-"}
+              value={summary.maxPctDiff !== null ? `%${summary.maxPctDiff.toFixed(1)}` : "-"}
               icon={TrendingUp}
-              accent="#b91c1c"
+              accent="var(--status-negative)"
             />
           </div>
         </div>
@@ -161,11 +167,21 @@ export function ShiftAnalysisPage() {
           <EmptyState message="Seçilen filtrelerle eşleşen bir vardiya anomalisi bulunamadı." />
         )}
         {cards.data && cards.data.items.length > 0 && (
-          <div className="grid grid-cols-1 gap-4 lg:grid-cols-2 xl:grid-cols-3">
-            {cards.data.items.map((card) => (
-              <ShiftAnomalyCard key={card.id} card={card} onViewDetail={setSelectedCard} />
-            ))}
-          </div>
+          <>
+            <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-4">
+              {pagedCards.map((card) => (
+                <ShiftAnomalyCard key={card.id} card={card} onViewDetail={setSelectedCard} />
+              ))}
+            </div>
+            <LoadMoreButton
+              hasMore={visibleCount < allCards.length}
+              isFetchingNextPage={false}
+              onLoadMore={() => setVisibleCount((c) => c + CARDS_PAGE_SIZE)}
+              loadedCount={pagedCards.length}
+              total={allCards.length}
+              itemLabel="tespit kartı"
+            />
+          </>
         )}
       </Card>
 

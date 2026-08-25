@@ -1,50 +1,109 @@
 import { useEffect, useState, type ReactNode } from "react";
-import { NavLink, useNavigate } from "react-router-dom";
+import { NavLink } from "react-router-dom";
 import {
-  LayoutGrid, Factory, Users, HardHat, Target, FileText,
+  LayoutGrid, Factory, Users, HardHat, Target, FileText, Presentation,
   LogOut, Moon, Sun, Sparkles, SearchCheck, Repeat2,
   Menu, X,
 } from "lucide-react";
 import { useAuth } from "../context/AuthContext";
 import { useTheme } from "../context/ThemeContext";
+import { PerformanceLeadersPanel } from "./PerformanceLeadersPanel";
 
-const NAV_ITEMS = [
-  { to: "/", label: "Genel Bakış", icon: LayoutGrid },
-  { to: "/plants", label: "Tesisler", icon: Factory },
-  { to: "/groups", label: "Gruplar", icon: Users },
-  { to: "/foremen", label: "Formenler", icon: HardHat },
-  { to: "/kpis", label: "KPI Analizi", icon: Target },
-  { to: "/improvement-works", label: "Katkılar", icon: Sparkles },
-  { to: "/anomalies", label: "Tespitler", icon: SearchCheck },
-  { to: "/shift-analysis", label: "Vardiya Analizi", icon: Repeat2 },
-  { to: "/reports", label: "Raporlar", icon: FileText },
+interface NavItem {
+  to: string;
+  label: string;
+  icon: typeof LayoutGrid;
+}
+
+interface NavSection {
+  label: string | null;
+  items: NavItem[];
+}
+
+const NAV_SECTIONS: NavSection[] = [
+  { label: null, items: [{ to: "/", label: "Genel Bakış", icon: LayoutGrid }] },
+  {
+    label: "Performans",
+    items: [
+      { to: "/plants", label: "Tesisler", icon: Factory },
+      { to: "/groups", label: "Gruplar", icon: Users },
+      { to: "/foremen", label: "Formenler", icon: HardHat },
+      { to: "/kpis", label: "KPI Analizi", icon: Target },
+    ],
+  },
+  {
+    label: "Operasyonel Zekâ",
+    items: [
+      { to: "/anomalies", label: "Tespitler", icon: SearchCheck },
+      { to: "/shift-analysis", label: "Vardiya Analizi", icon: Repeat2 },
+      { to: "/improvement-works", label: "Operational Impact+", icon: Sparkles },
+    ],
+  },
+  {
+    label: "Çıktılar",
+    items: [
+      { to: "/executive-summary", label: "Yönetici Özeti", icon: Presentation },
+      { to: "/reports", label: "Raporlar", icon: FileText },
+    ],
+  },
 ];
 
 function NavLinks({ onNavigate }: { onNavigate?: () => void }) {
   return (
-    <nav className="flex flex-1 flex-col gap-0.5 overflow-y-auto p-3">
-      {NAV_ITEMS.map((item) => {
-        const Icon = item.icon;
-        return (
-          <NavLink
-            key={item.to}
-            to={item.to}
-            end={item.to === "/"}
-            onClick={onNavigate}
-            className={({ isActive }) =>
-              `flex items-center gap-2.5 rounded-md px-3 py-2 text-[13px] font-medium transition-colors ${
-                isActive ? "" : "text-[var(--sidebar-text)] hover:text-[var(--sidebar-text-hover)]"
-              }`
-            }
-            style={({ isActive }) =>
-              isActive ? { background: "var(--sidebar-active-bg)", color: "var(--sidebar-text-active)" } : undefined
-            }
-          >
-            <Icon size={16} strokeWidth={1.75} className="shrink-0" />
-            {item.label}
-          </NavLink>
-        );
-      })}
+    <nav className="flex flex-1 flex-col gap-3 overflow-y-auto px-2.5 py-3">
+      {NAV_SECTIONS.map((section, sIdx) => (
+        <div key={section.label ?? `section-${sIdx}`} className="flex flex-col gap-0.5">
+          {section.label && (
+            <p
+              className="text-label px-3 pb-1 pt-0.5"
+              style={{ color: "var(--sidebar-muted)" }}
+            >
+              {section.label}
+            </p>
+          )}
+          {section.items.map((item) => {
+            const Icon = item.icon;
+            return (
+              <NavLink
+                key={item.to}
+                to={item.to}
+                end={item.to === "/"}
+                onClick={onNavigate}
+                title={item.label}
+                className={({ isActive }) =>
+                  `relative flex min-w-0 items-center gap-2.5 rounded-md py-1.5 pl-3 pr-2.5 text-[13px] font-medium transition-colors ${
+                    isActive
+                      ? ""
+                      : "sidebar-nav-item text-[var(--sidebar-text)] hover:text-[var(--sidebar-text-hover)]"
+                  }`
+                }
+                style={({ isActive }) =>
+                  isActive ? { background: "var(--sidebar-active-bg)", color: "var(--sidebar-text-active)" } : undefined
+                }
+              >
+                {({ isActive }) =>
+                  <>
+                    {isActive && (
+                      <span
+                        aria-hidden="true"
+                        className="absolute left-0 top-1/2 h-4 w-[3px] -translate-y-1/2 rounded-r-full"
+                        style={{ background: "var(--sidebar-active-indicator)" }}
+                      />
+                    )}
+                    <Icon size={16} strokeWidth={1.75} className="shrink-0" />
+                    <span className="truncate">{item.label}</span>
+                  </>
+                }
+              </NavLink>
+            );
+          })}
+          {section.label === "Çıktılar" && (
+            <div className="mt-2 pt-2" style={{ borderTop: "1px solid var(--sidebar-border)" }}>
+              <PerformanceLeadersPanel onNavigate={onNavigate} />
+            </div>
+          )}
+        </div>
+      ))}
     </nav>
   );
 }
@@ -52,7 +111,6 @@ function NavLinks({ onNavigate }: { onNavigate?: () => void }) {
 export function Layout({ children }: { children: ReactNode }) {
   const { user, logout } = useAuth();
   const { theme, toggleTheme } = useTheme();
-  const navigate = useNavigate();
   const [mobileNavOpen, setMobileNavOpen] = useState(false);
 
   useEffect(() => {
@@ -72,12 +130,11 @@ export function Layout({ children }: { children: ReactNode }) {
   return (
     <div className="flex min-h-screen bg-[var(--page-bg)]">
       <aside
-        className="hidden w-60 shrink-0 flex-col md:flex"
+        className="hidden w-[var(--sidebar-width)] shrink-0 flex-col md:flex"
         style={{ background: "var(--sidebar-bg)", borderRight: "1px solid var(--sidebar-border)" }}
       >
-        <div className="px-5 py-4" style={{ borderBottom: "1px solid var(--sidebar-border)" }}>
-          <img src="/logo.png" alt="Formen Takip" className="h-auto w-[150px]" />
-          <p className="mt-1 text-xs" style={{ color: "var(--sidebar-subtext)" }}>Üst Yönetim Paneli</p>
+        <div className="px-4 py-4" style={{ borderBottom: "1px solid var(--sidebar-border)" }}>
+          <img src="/logo.png" alt="CORVUS Logo" className="h-auto w-full" />
         </div>
         <NavLinks />
       </aside>
@@ -94,10 +151,10 @@ export function Layout({ children }: { children: ReactNode }) {
             style={{ background: "var(--sidebar-bg)", borderRight: "1px solid var(--sidebar-border)" }}
           >
             <div
-              className="flex items-center justify-between px-5 py-4"
+              className="flex items-center justify-between px-4 py-3.5"
               style={{ borderBottom: "1px solid var(--sidebar-border)" }}
             >
-              <img src="/logo.png" alt="Formen Takip" className="h-auto w-[150px]" />
+              <img src="/logo.png" alt="CORVUS Logo" className="h-auto w-[170px]" />
               <button
                 onClick={() => setMobileNavOpen(false)}
                 aria-label="Menüyü kapat"
@@ -112,12 +169,12 @@ export function Layout({ children }: { children: ReactNode }) {
         </div>
       )}
 
-      <div className="flex min-h-screen flex-1 flex-col">
+      <div className="flex min-h-screen min-w-0 flex-1 flex-col">
         <header
-          className="flex items-center justify-between bg-[var(--surface)] px-6 py-3"
+          className="flex items-center justify-between gap-3 bg-[var(--surface)] px-[var(--space-page-padding)] py-[var(--space-header-y)]"
           style={{ borderBottom: "1px solid var(--border)" }}
         >
-          <div className="flex items-center gap-3">
+          <div className="flex min-w-0 items-center gap-3">
             <button
               onClick={() => setMobileNavOpen(true)}
               aria-label="Menüyü aç"
@@ -126,44 +183,41 @@ export function Layout({ children }: { children: ReactNode }) {
             >
               <Menu size={18} strokeWidth={1.75} />
             </button>
-            <div className="flex items-center gap-2 text-xs" style={{ color: "var(--text-muted)" }}>
-              <span
-                className="inline-flex items-center rounded border px-2 py-0.5 font-medium uppercase tracking-wide"
-                style={{ borderColor: "var(--border-strong)", color: "var(--text-secondary)" }}
-              >
-                Sentetik Veri Kaynağı — Demo
-              </span>
-              <span>SAP entegrasyonu bu ortamda aktif değildir.</span>
-            </div>
+            <span
+              className="text-metadata hidden items-center gap-1.5 rounded border px-2 py-1 uppercase sm:inline-flex"
+              style={{ borderColor: "var(--border-strong)", color: "var(--text-secondary)" }}
+              title="SAP entegrasyonu bu ortamda aktif değildir."
+            >
+              Sentetik Veri Kaynağı — Demo
+            </span>
           </div>
-          <div className="flex items-center gap-4">
+          <div className="flex shrink-0 items-center gap-4">
             <button
               onClick={toggleTheme}
               title={theme === "dark" ? "Açık temaya geç" : "Koyu temaya geç"}
               aria-label={theme === "dark" ? "Açık temaya geç" : "Koyu temaya geç"}
-              className="flex items-center justify-center rounded-md border p-1.5 transition-colors hover:bg-[var(--page-bg)]"
+              className="flex items-center justify-center rounded-md border p-1.5 transition-colors hover:bg-[var(--page-bg)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--focus-ring)]/40"
               style={{ borderColor: "var(--border-strong)", color: "var(--text-secondary)" }}
             >
               {theme === "dark" ? <Sun size={15} strokeWidth={1.75} /> : <Moon size={15} strokeWidth={1.75} />}
             </button>
-            <div className="text-right text-xs leading-tight">
-              <div className="font-medium" style={{ color: "var(--text-primary)" }}>{user?.full_name}</div>
-              <div style={{ color: "var(--text-muted)" }}>{user?.title}</div>
+            <div className="hidden text-right leading-tight sm:block">
+              <div className="text-[13px] font-medium" style={{ color: "var(--text-primary)" }}>{user?.fullName}</div>
+              {user?.email && <div className="text-metadata" style={{ color: "var(--text-muted)" }}>{user.email}</div>}
             </div>
             <button
               onClick={() => {
-                logout();
-                navigate("/login");
+                void logout();
               }}
-              className="flex items-center gap-1.5 rounded-md border px-3 py-1.5 text-xs font-medium transition-colors hover:bg-[var(--page-bg)]"
+              className="flex items-center gap-1.5 rounded-md border px-3 py-1.5 text-xs font-medium transition-colors hover:bg-[var(--page-bg)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--focus-ring)]/40"
               style={{ borderColor: "var(--border-strong)", color: "var(--text-secondary)" }}
             >
               <LogOut size={14} strokeWidth={1.75} />
-              Çıkış Yap
+              <span className="hidden sm:inline">Çıkış Yap</span>
             </button>
           </div>
         </header>
-        <main className="flex-1 overflow-x-hidden p-6">{children}</main>
+        <main className="flex-1 overflow-x-hidden p-[var(--space-page-padding)]">{children}</main>
       </div>
     </div>
   );

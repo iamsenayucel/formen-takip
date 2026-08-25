@@ -11,6 +11,7 @@ from datetime import date, datetime, timezone
 from pydantic import BaseModel, Field, ValidationError
 from sqlalchemy.orm import Session
 
+from app.core import clock
 from app.core.config import get_settings
 from app.models.anomaly import Anomaly, AnomalyAnalysis, AnomalyToolCall
 from app.models.enums import AnomalyAnalysisStatus
@@ -19,6 +20,7 @@ from app.models.organization import Factory, Plant, Shift
 from app.schemas.anomaly_analysis import AnalysisResult
 from app.schemas.json_schema_utils import strict_json_schema
 from app.services import llm_service
+from app.services.anomaly_job_claim import set_anomaly_status_if_current
 from app.services.anomaly_kpi_defs import ANOMALY_TYPE_LABELS
 from app.services.data_providers import get_data_providers
 from app.services.tools.definitions import TOOL_REGISTRY, get_tool, list_tool_specs, parse_tool_arguments
@@ -83,7 +85,7 @@ class OrchestratorOutcome:
 
 
 def new_code(prefix: str) -> str:
-    return f"{prefix}-{datetime.now(timezone.utc).year}-{uuid.uuid4().hex[:8].upper()}"
+    return f"{prefix}-{clock.today_local().year}-{uuid.uuid4().hex[:8].upper()}"
 
 
 def _json_default(value: object) -> object:
@@ -165,9 +167,9 @@ class AnomalyAnalysisOrchestrator:
         self._call_index = 0
 
     def _set_status(self, analysis: AnomalyAnalysis, status: AnomalyAnalysisStatus) -> None:
-        self.anomaly.analysis_status = status
         analysis.status = status
         self.db.commit()
+        set_anomaly_status_if_current(self.db, self.anomaly, analysis, status)
 
     def run(self, analysis: AnomalyAnalysis) -> OrchestratorOutcome:
         deadline = time.monotonic() + self.settings.llm_analysis_timeout_seconds

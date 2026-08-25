@@ -1,0 +1,39 @@
+# Opsiyonel local PostgreSQL overlay'i yalnız DB aynı host'taysa kullanın.
+# Harici DB için bu dosyayı eklemeyin; backend DATABASE_URL değerini doğrudan verin.
+#
+# POSTGRES_BIND varsayılan olarak yalnız aynı host'a açıktır.
+# Ayrı backend host'u için private ağ adresi kullanın; 0.0.0.0 kullanmayın.
+services:
+  postgres:
+    image: postgres:16
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-formen}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-formen}
+      POSTGRES_DB: ${POSTGRES_DB:-formen_takip}
+    # Docker'ın varsayılan 64 MB /dev/shm'i, ~1.3M satırlık performans tablosunda
+    # paralel sorgu worker'ları için yetmiyor ve aralıklı "DiskFull: could not
+    # resize shared memory segment" hatalarına yol açıyor (host diskiyle ilgisi yok).
+    shm_size: 1gb
+    volumes:
+      - formen_pg_data:/var/lib/postgresql/data
+    ports:
+      - "${POSTGRES_BIND:-127.0.0.1}:5433:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-formen}"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  backend:
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+  scheduler:
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+volumes:
+  formen_pg_data:

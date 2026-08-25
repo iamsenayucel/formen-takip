@@ -9,6 +9,7 @@ from datetime import datetime, timezone
 from pydantic import ValidationError
 from sqlalchemy.orm import Session
 
+from app.core import clock
 from app.core.config import get_settings
 from app.models.anomaly import Anomaly, AnomalyAnalysis
 from app.models.enums import AnalysisMode, AnomalyAnalysisStatus
@@ -17,24 +18,21 @@ from app.services import llm_service
 from app.services.anomaly_context import SYSTEM_PROMPT, build_analysis_package, build_user_message
 from app.services.anomaly_demo_fallback import generate_demo_analysis
 from app.services.anomaly_demo_tool_calling import run_demo_tool_calling
+from app.services.anomaly_job_claim import (
+    IN_PROGRESS_STATUSES,
+    AnalysisInProgressError,
+    claim_analysis,
+    set_anomaly_status_if_current,
+)
 from app.services.anomaly_orchestrator import AnomalyAnalysisOrchestrator, build_initial_context
 
 logger = logging.getLogger("app.anomaly_analysis")
 
 _ANALYSIS_RESULT_SCHEMA = strict_json_schema(AnalysisResult)
 
-_IN_PROGRESS_STATUSES = {
-    AnomalyAnalysisStatus.ANALYZING, AnomalyAnalysisStatus.QUEUED, AnomalyAnalysisStatus.PLANNING,
-    AnomalyAnalysisStatus.COLLECTING_DATA, AnomalyAnalysisStatus.GENERATING_ANALYSIS,
-}
-
-
-class AnalysisInProgressError(Exception):
-    pass
-
 
 def _new_code() -> str:
-    return f"ANA-{datetime.now(timezone.utc).year}-{uuid.uuid4().hex[:8].upper()}"
+    return f"ANA-{clock.today_local().year}-{uuid.uuid4().hex[:8].upper()}"
 
 
 _TOP_LEVEL_FIELD = "executive_summary"
@@ -81,9 +79,10 @@ def _attempt_single_context(anomaly: Anomaly, package: dict, user_message: str, 
     return result.model_dump(mode="json"), model_name
 
 
-def _run_single_context(db: Session, anomaly: Anomaly) -> _RunResult:
-    anomaly.analysis_status = AnomalyAnalysisStatus.ANALYZING
+def _run_single_context(db: Session, anomaly: Anomaly, analysis: AnomalyAnalysis) -> _RunResult:
+    analysis.status = AnomalyAnalysisStatus.ANALYZING
     db.commit()
+    set_anomaly_status_if_current(db, anomaly, analysis, AnomalyAnalysisStatus.ANALYZING)
 
     use_llm = llm_service.is_configured()
     package = build_analysis_package(db, anomaly)
@@ -149,7 +148,7 @@ def _run_tool_calling(db: Session, anomaly: Anomaly, analysis: AnomalyAnalysis) 
         logger.warning(
             "Model tool calling desteklemiyor (anomaly=%s), single_context moduna düşülüyor: %s", anomaly.code, exc
         )
-        fallback = _run_single_context(db, anomaly)
+        fallback = _run_single_context(db, anomaly, analysis)
         fallback.mode = AnalysisMode.SINGLE_CONTEXT
         fallback.warnings = ["Kullanılan model tool calling desteklemediği için single_context moduna düşüldü."]
         return fallback
@@ -163,7 +162,10 @@ def _run_tool_calling(db: Session, anomaly: Anomaly, analysis: AnomalyAnalysis) 
 
 
 def run_analysis(db: Session, anomaly: Anomaly, mode: AnalysisMode | str | None = None) -> AnomalyAnalysis:
-    if anomaly.analysis_status in _IN_PROGRESS_STATUSES:
+    # Yalnızca hızlı ön kontroldür; açık contention durumunda AnomalyAnalysis satırı
+    # oluşturmaktan kaçınır. Asıl mutual-exclusion garantisini claim_analysis() içindeki
+    # partial unique index verir; bu kontrolle yarışan ikinci çağrı yine indekse takılır.
+    if anomaly.analysis_status in IN_PROGRESS_STATUSES:
         raise AnalysisInProgressError("Bu tespit için analiz zaten devam ediyor.")
 
     settings = get_settings()
@@ -173,19 +175,16 @@ def run_analysis(db: Session, anomaly: Anomaly, mode: AnalysisMode | str | None 
 
     started_at = datetime.now(timezone.utc)
     analysis = AnomalyAnalysis(
-        code=_new_code(), anomaly_id=anomaly.id, model="pending", is_demo=True, mode=requested_mode,
+        id=uuid.uuid4(), code=_new_code(), anomaly_id=anomaly.id, model="pending", is_demo=True, mode=requested_mode,
         status=AnomalyAnalysisStatus.QUEUED, started_at=started_at,
     )
-    db.add(analysis)
-    anomaly.analysis_status = AnomalyAnalysisStatus.QUEUED
-    db.commit()
-    db.refresh(analysis)
+    claim_analysis(db, anomaly, analysis)
 
     perf_start = time.monotonic()
     run_result = (
         _run_tool_calling(db, anomaly, analysis)
         if requested_mode == AnalysisMode.TOOL_CALLING
-        else _run_single_context(db, anomaly)
+        else _run_single_context(db, anomaly, analysis)
     )
     response_seconds = round(time.monotonic() - perf_start, 3)
 
@@ -206,10 +205,12 @@ def run_analysis(db: Session, anomaly: Anomaly, mode: AnalysisMode | str | None 
     analysis.error_message = run_result.error_message
     analysis.error_code = run_result.error_code
     analysis.completed_at = datetime.now(timezone.utc)
-
-    anomaly.analysis_status = final_status
+    # Bu denemenin kendi satırı, aşağıdaki anomali durumunun stale olup olmamasından
+    # bağımsız olarak her zaman yazılır.
     db.commit()
     db.refresh(analysis)
+
+    set_anomaly_status_if_current(db, anomaly, analysis, final_status)
 
     logger.info(
         "Anomaly analysis finished anomaly=%s analysis=%s mode=%s model=%s status=%s response_seconds=%s",

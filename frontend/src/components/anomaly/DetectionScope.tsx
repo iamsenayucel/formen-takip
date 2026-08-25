@@ -1,6 +1,7 @@
 import { Link } from "react-router-dom";
-import type { AnomalyDetail, AnomalyInvestigation } from "../../api/types";
+import type { AnomalyDetail } from "../../api/types";
 import { formatDateRangeTR, formatDateTR } from "../../lib/dateFormat";
+import { formatMetricValue } from "../../lib/anomalyMetrics";
 import { isHigherBetter } from "../../lib/kpiDirection";
 
 function ScopeField({ label, children }: { label: string; children: React.ReactNode }) {
@@ -14,60 +15,38 @@ function ScopeField({ label, children }: { label: string; children: React.ReactN
 
 const NOT_AVAILABLE = <span style={{ color: "var(--text-muted)" }}>Veri mevcut değil</span>;
 
-export function DetectionScope({ anomaly, investigation }: { anomaly: AnomalyDetail; investigation?: AnomalyInvestigation }) {
+export function DetectionScope({ anomaly }: { anomaly: AnomalyDetail }) {
   const a = anomaly;
-  const higherIsBetter = isHigherBetter(a.kpi_definition.desired_direction);
+  const higherIsBetter = isHigherBetter(a.kpiDefinition.desiredDirection);
 
   let worstDay: { date: string; value: number } | null = null;
-  let bestValue: number | null = null;
-  let worstValue: number | null = null;
-  if (a.daily_history.length > 0) {
-    bestValue = a.daily_history[0].value;
-    worstValue = a.daily_history[0].value;
-    worstDay = a.daily_history[0];
-    for (const p of a.daily_history) {
-      if (bestValue == null || (higherIsBetter ? p.value > bestValue : p.value < bestValue)) bestValue = p.value;
-      if (worstValue == null || (higherIsBetter ? p.value < worstValue : p.value > worstValue)) {
-        worstValue = p.value;
-        worstDay = p;
-      }
+  if (a.dailyHistory.length > 0) {
+    worstDay = a.dailyHistory[0];
+    for (const p of a.dailyHistory) {
+      const isWorse = higherIsBetter ? p.value < worstDay.value : p.value > worstDay.value;
+      if (isWorse) worstDay = p;
     }
   }
 
-  const foreman = investigation?.responsible_foreman;
-
   return (
-    <div className="grid grid-cols-2 gap-x-4 gap-y-4 sm:grid-cols-3 lg:grid-cols-4">
-      <ScopeField label="Fabrika">{a.factory_code ?? NOT_AVAILABLE}</ScopeField>
-      <ScopeField label="Tesis">
-        <Link to={`/plants/${a.plant_id}`} className="hover:underline" style={{ color: "var(--accent)" }}>{a.plant_name}</Link>
-      </ScopeField>
-      <ScopeField label="Vardiya">{a.shift_name ?? <span style={{ color: "var(--text-muted)" }}>Vardiyaya özgü değil</span>}</ScopeField>
-      <ScopeField label="Dönem">{formatDateRangeTR(a.period_start, a.period_end)}</ScopeField>
-
-      <ScopeField label="Sorumlu Formen">
-        {!investigation && "Yükleniyor..."}
-        {investigation && foreman?.resolved && foreman.primary && (
-          <Link to={`/foremen/${foreman.primary.id}`} className="hover:underline" style={{ color: "var(--accent)" }}>
-            {foreman.primary.name}
-          </Link>
-        )}
-        {investigation && !foreman?.resolved && (foreman?.reason ? <span style={{ color: "var(--text-muted)" }}>{foreman.reason}</span> : NOT_AVAILABLE)}
-      </ScopeField>
-      <ScopeField label="Etkilenen Gün Sayısı">
-        {a.affected_days != null && a.total_days != null ? `${a.affected_days} / ${a.total_days} gün` : NOT_AVAILABLE}
-      </ScopeField>
-      <ScopeField label="En Kötü Gün">
-        {worstDay ? `${formatDateTR(worstDay.date)} (%${worstDay.value.toFixed(2)})` : NOT_AVAILABLE}
-      </ScopeField>
-      <ScopeField label="En Yüksek / En Düşük Değer">
-        {bestValue != null && worstValue != null ? `%${Math.max(bestValue, worstValue).toFixed(2)} / %${Math.min(bestValue, worstValue).toFixed(2)}` : NOT_AVAILABLE}
-      </ScopeField>
-
-      <ScopeField label="İlgili Ürün / Ürün Grubu">{NOT_AVAILABLE}</ScopeField>
-      <ScopeField label="İlgili Hat / Makine">{NOT_AVAILABLE}</ScopeField>
-      <ScopeField label="İlgili KPI">{a.kpi_name}</ScopeField>
-      <ScopeField label="Tespit Türü">{a.anomaly_type_label}</ScopeField>
+    <div className="flex flex-col gap-4">
+      <div className="grid grid-cols-2 gap-x-4 gap-y-3 sm:grid-cols-3 lg:grid-cols-4">
+        <ScopeField label="Fabrika">{a.factoryCode ?? NOT_AVAILABLE}</ScopeField>
+        <ScopeField label="Tesis">
+          <Link to={`/plants/${a.plantId}`} className="hover:underline" style={{ color: "var(--accent)" }}>{a.plantName}</Link>
+        </ScopeField>
+        <ScopeField label="Vardiya">{a.shiftName ?? <span style={{ color: "var(--text-muted)" }}>Vardiyaya özgü değil</span>}</ScopeField>
+        <ScopeField label="Dönem">{formatDateRangeTR(a.periodStart, a.periodEnd)}</ScopeField>
+        <ScopeField label="Etkilenen Gün">
+          {a.affectedDays != null && a.totalDays != null ? `${a.affectedDays} / ${a.totalDays}` : NOT_AVAILABLE}
+        </ScopeField>
+        <ScopeField label="KPI">{a.kpiName}</ScopeField>
+        <ScopeField label="Tespit Türü">{a.anomalyTypeLabel}</ScopeField>
+        <ScopeField label="En Kötü Gün">
+          {worstDay ? `${formatDateTR(worstDay.date)} · ${formatMetricValue(worstDay.value, a.unit)}` : NOT_AVAILABLE}
+        </ScopeField>
+      </div>
+      <p className="text-xs" style={{ color: "var(--text-muted)" }}>Ürün / hat kırılımı için veri bulunmuyor.</p>
     </div>
   );
 }

@@ -1,10 +1,7 @@
 import { Bar, BarChart, Cell, LabelList, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
 import type { ShiftAnomalyForemanStat } from "../../api/types";
-import { resolveChartInk } from "../../lib/chartColors";
+import { resolveChartInk, statusChartColor } from "../../lib/chartColors";
 import { useTheme } from "../../context/ThemeContext";
-
-const BETTER_COLOR = "#16a34a";
-const WORSE_COLOR = "#dc2626";
 
 export function ShiftComparisonMiniChart({
   better, worse, unit, decimalPlaces = 1,
@@ -19,8 +16,8 @@ export function ShiftComparisonMiniChart({
   const ink = resolveChartInk(isDark);
 
   const data = [
-    { name: worse.name, value: worse.avg_actual, isBetter: false },
-    { name: better.name, value: better.avg_actual, isBetter: true },
+    { name: worse.name, value: worse.avgActual, isBetter: false },
+    { name: better.name, value: better.avgActual, isBetter: true },
   ];
 
   return (
@@ -40,7 +37,7 @@ export function ShiftComparisonMiniChart({
         />
         <Bar dataKey="value" radius={[4, 4, 0, 0]} barSize={48} isAnimationActive={false}>
           {data.map((d) => (
-            <Cell key={d.name} fill={d.isBetter ? BETTER_COLOR : WORSE_COLOR} />
+            <Cell key={d.name} fill={statusChartColor(d.isBetter ? "positive" : "negative", isDark)} />
           ))}
           <LabelList dataKey="value" position="top" fontSize={11} fill={ink.primary} formatter={(v) => Number(v).toFixed(decimalPlaces)} />
         </Bar>

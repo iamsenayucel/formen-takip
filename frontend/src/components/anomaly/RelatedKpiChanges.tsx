@@ -1,6 +1,7 @@
 import type { RelatedKpiChange } from "../../api/types";
 import { EmptyState } from "../StateViews";
-import { formatSignedPct, formatSignedPoints, PERFORMANCE_COLORS, PERFORMANCE_LABELS } from "../../lib/kpiDirection";
+import { formatSignedPct, PERFORMANCE_COLORS, PERFORMANCE_LABELS } from "../../lib/kpiDirection";
+import { formatSignedUnitDiff } from "../../lib/anomalyMetrics";
 import { accentLineColor } from "../../lib/chartColors";
 import { useTheme } from "../../context/ThemeContext";
 
@@ -29,41 +30,41 @@ export function RelatedKpiChanges({ items }: { items: RelatedKpiChange[] }) {
   const { theme } = useTheme();
   const isDark = theme === "dark";
 
-  if (items.length === 0) return <EmptyState message="İlişkili KPI sinyali bulunamadı." />;
+  if (items.length === 0) return <EmptyState message="Aynı dönemde dikkat çeken başka bir KPI değişimi bulunamadı." />;
 
   return (
     <div className="flex flex-col gap-3">
+      <p className="text-xs" style={{ color: "var(--text-muted)" }}>
+        Bu KPI'lar aynı dönemde belirgin şekilde değişmiştir. Bu durum nedensellik göstermez; yalnızca aynı zaman aralığında gerçekleşen değişimleri gösterir.
+      </p>
       <ul className="flex flex-col gap-2">
         {items.map((item) => {
-          const dir = item.performance_direction ?? "unknown";
+          const dir = item.performanceDirection ?? "unknown";
           return (
             <li
-              key={item.kpi_code}
+              key={item.kpiCode}
               className="flex flex-wrap items-center justify-between gap-3 rounded-md p-3 text-[13px]"
               style={{ border: "1px solid var(--border)" }}
             >
               <div className="min-w-[140px]">
                 <p className="font-medium" style={{ color: "var(--text-primary)" }}>{item.kpi}</p>
                 <p className="tabular-nums" style={{ color: "var(--text-muted)" }}>
-                  %{item.baseline_value.toFixed(2)} → %{item.current_value.toFixed(2)}
+                  %{item.baselineValue.toFixed(2)} → %{item.currentValue.toFixed(2)}
                 </p>
               </div>
               <Sparkline values={item.sparkline} color={accentLineColor(isDark)} />
               <div className="text-right">
                 <p className="font-semibold tabular-nums" style={{ color: PERFORMANCE_COLORS[dir] }}>
-                  {formatSignedPoints(item.abs_change)}
+                  {formatSignedUnitDiff(item.absChange, "%")}
                 </p>
                 <p className="text-xs tabular-nums" style={{ color: PERFORMANCE_COLORS[dir] }}>
-                  {formatSignedPct(item.change_percent)} · {PERFORMANCE_LABELS[dir]}
+                  {formatSignedPct(item.changePercent)} · {PERFORMANCE_LABELS[dir]}
                 </p>
               </div>
             </li>
           );
         })}
       </ul>
-      <p className="text-xs italic" style={{ color: "var(--text-muted)" }}>
-        Bu değişimler tespit edilen KPI ile aynı dönemde gerçekleşmiştir; nedensellik ifade etmez.
-      </p>
     </div>
   );
 }

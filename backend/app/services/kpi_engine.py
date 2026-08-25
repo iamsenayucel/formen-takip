@@ -11,6 +11,9 @@ DEFAULT_BASE_SCORE = 100.0
 
 MIN_COVERED_WEIGHT_RATIO = 0.5
 
+DAY_MINUTES = 1440.0
+SHIFT_MINUTES = 720.0
+
 
 class KpiCalculationError(ValueError):
     pass
@@ -132,6 +135,15 @@ def score_iskarta(actual: float, target: float, good_coefficient: float = 12.0, 
     else:
         raw = 100.0 - bad_coefficient * math.log2(ratio)
     return ScoreResult(raw_score=raw, capped_score=max(0.0, raw))
+
+
+def score_target_ratio_linear_bonus(
+    actual: float, target: float, ratio_multiplier: float = 1.05, max_score: float = 105.0
+) -> ScoreResult:
+    if target is None or target <= 0:
+        raise KpiCalculationError("Hedef sıfır, negatif veya eksik olamaz.")
+    raw = (actual / target) * 100.0 * ratio_multiplier
+    return ScoreResult(raw_score=raw, capped_score=max(0.0, min(max_score, raw)))
 
 
 def _plan_compliance_from_deviation(deviation_rate: float, normal_deviation_limit: float, excess_deviation_coefficient: float) -> float:
@@ -267,6 +279,9 @@ _CUSTOM_FORMULA_DISPATCH = {
         actual, target, p.get("good_coefficient", 12.0), p.get("bad_coefficient", 12.0)
     ),
     "HYBRID_BASE_PIECEWISE_LOG": _dispatch_hybrid_base_piecewise_log,
+    "TARGET_RATIO_LINEAR_BONUS": lambda actual, target, p: score_target_ratio_linear_bonus(
+        actual, target, p.get("ratio_multiplier", 1.05), p.get("max_score", 105.0)
+    ),
 }
 
 
@@ -462,6 +477,13 @@ def resolve_performance_level(score: float, levels: list[PerformanceLevel]) -> P
         if level.min_score <= score <= level.max_score:
             return level
     return ordered[0] if score < ordered[0].min_score else ordered[-1]
+
+
+OUTSTANDING_PERFORMANCE_THRESHOLD = 105.0
+
+
+def is_outstanding_performance(score: float) -> bool:
+    return score >= OUTSTANDING_PERFORMANCE_THRESHOLD
 
 
 def aggregate_ratio_kpi(numerator_sum: float, denominator_sum: float) -> float:

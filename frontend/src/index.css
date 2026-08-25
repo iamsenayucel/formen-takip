@@ -11,16 +11,65 @@
   --page-bg: #0a0e1a;
   --surface: #111827;
   --surface-raised: #1a2333;
+  --surface-muted: #0d1420;
+  --surface-accent: #172554;
+  --surface-inset: #0d1420;
+  --surface-highlight: color-mix(in srgb, #3b82f6 12%, #111827);
+  --surface-selected: color-mix(in srgb, #3b82f6 16%, #111827);
+  --surface-critical: color-mix(in srgb, #e90128 14%, #111827);
+  --surface-hero: linear-gradient(135deg, var(--surface-raised) 0%, var(--surface-muted) 100%);
+  --surface-hero-border: var(--border);
   --border: #1f2937;
   --border-strong: #334155;
+  --border-subtle: #161f2e;
+  --shadow-panel: 0 1px 2px rgba(0, 0, 0, 0.4), 0 8px 24px -12px rgba(0, 0, 0, 0.55);
+
+  --row-alternate: #0d1420;
+  --row-hover: #16213a;
 
   --text-primary: #f1f5f9;
   --text-secondary: #94a3b8;
   --text-muted: #64748b;
 
-  --accent: #3b82f6;
-  --accent-hover: #60a5fa;
-  --accent-subtle: #172554;
+  /* Marka/etkileşim rengi — primary mavi ailesiyle eşlenir, bkz. --primary-*.
+     Bileşenlerdeki mevcut var(--accent) referansları (buton, aktif sekme,
+     odak halkası vb.) böylece tek noktadan primary'ye bağlanır. */
+  --primary: #3b82f6;
+  --primary-hover: #60a5fa;
+  --primary-subtle: #172554;
+  --primary-border: #2f4a86;
+  --focus-ring: #3b82f6;
+  --hero-accent: var(--primary-border);
+
+  --accent: var(--primary);
+  --accent-hover: var(--primary-hover);
+  --accent-subtle: var(--primary-subtle);
+
+  /* Veri görselleştirme — status renklerinden bağımsız, nötr seri kimliği. */
+  --data-primary: #6da7ec;
+  --data-secondary: #9a9bbd;
+  --data-grid: #1f2937;
+  --data-axis: #334155;
+  --data-target: #8586a7;
+  --data-tooltip-bg: #1a2333;
+
+  /* Status semantiği — sabit hex'ler (bkz. RENK SEMANTİĞİ), yalnızca
+     bg/border varyantları tema kontrastına göre color-mix ile üretilir. */
+  --status-negative: #f0435f;
+  --status-negative-bg: color-mix(in srgb, #e90128 18%, transparent);
+  --status-negative-border: color-mix(in srgb, #e90128 40%, transparent);
+  --status-positive: #22a35e;
+  --status-positive-bg: color-mix(in srgb, #15803d 20%, transparent);
+  --status-positive-border: color-mix(in srgb, #15803d 42%, transparent);
+  --status-neutral: #d9a520;
+  --status-neutral-bg: color-mix(in srgb, #ca8a04 20%, transparent);
+  --status-neutral-border: color-mix(in srgb, #ca8a04 42%, transparent);
+  --status-info: #5b9bf5;
+  --status-info-bg: color-mix(in srgb, #5b9bf5 18%, transparent);
+  --status-info-border: color-mix(in srgb, #5b9bf5 40%, transparent);
+  --status-unknown: var(--text-muted);
+  --status-unknown-bg: color-mix(in srgb, #64748b 16%, transparent);
+  --status-unknown-border: color-mix(in srgb, #64748b 36%, transparent);
 
   --sidebar-bg: #0f172a;
   --sidebar-border: #1e293b;
@@ -28,40 +77,149 @@
   --sidebar-subtext: #64748b;
   --sidebar-text: #94a3b8;
   --sidebar-text-hover: #f1f5f9;
-  --sidebar-active-bg: #1e293b;
+  --sidebar-active-bg: color-mix(in srgb, var(--primary) 9%, var(--sidebar-bg));
   --sidebar-text-active: #ffffff;
-  --sidebar-muted: #475569;
+  --sidebar-active-indicator: var(--primary);
+  --sidebar-muted: #64748b;
+
+  /* Sidebar "Performans Liderleri" tanınma kartları (bkz. PerformanceLeadersPanel).
+     Yıl lideri kartı mevcut --primary/--primary-subtle ailesini yeniden kullanır;
+     altın, buraya özel tek yeni semantik olarak eklenir. */
+  --leader-gold: #e9a72f;
 }
 
 :root[data-theme="light"] {
   color-scheme: light;
 
-  --page-bg: #ffffff;
+  /* Ana canvas artık saf beyaz değil — kırık beyaz/sıcak gri. Kartlar (--surface)
+     beyaz kalır, böylece Page → Section → Card katmanları hafifçe ayrışır. */
+  --page-bg: #f7f6f4;
   --surface: #ffffff;
   --surface-raised: #ffffff;
+  --surface-muted: #f5f3f1;
+  --surface-accent: #fef2f2;
+  --surface-inset: #f5f3f1;
+  --surface-highlight: #eef2fa;
+  --surface-selected: #e6ecf8;
+  --surface-critical: #fdecee;
+  --surface-hero: linear-gradient(135deg, var(--surface) 0%, #f3f6fa 100%);
+  --surface-hero-border: #e2e8f0;
   --border: #e5e7eb;
   --border-strong: #d1d5db;
+  --border-subtle: #ececea;
+  --shadow-panel: 0 1px 2px rgba(17, 24, 39, 0.04), 0 8px 24px -14px rgba(17, 24, 39, 0.18);
+
+  /* Tablo zebra/hover — primary mavinin çok düşük yoğunluklu tonları. */
+  --row-alternate: #f7f9fd;
+  --row-hover: #eef2fa;
 
   --text-primary: #111827;
   --text-secondary: #4b5563;
-  --text-muted: #9ca3af;
+  --text-muted: #1f2937;
 
-  /* Kurumsal marka vurgusu — kontrollü kullanım için bkz. bileşenlerdeki
-     var(--accent) referansları: butonlar, aktif menü/sekme, seçili filtreler,
-     ana grafik serisi, focus halkası. Zemin renkleri (beyaz/gri) değişmez. */
-  --accent: #e90128;
-  --accent-hover: #c2011f;
-  --accent-subtle: #fdecee;
+  /* Kurumsal kırmızı (#e90128) yalnızca logo ve status-negative için ayrılmıştır —
+     normal UI etkileşimi (buton, aktif menü/sekme, seçili filtre, odak halkası,
+     ana grafik serisi) primary mavi ailesini kullanır. Bkz. RENK SEMANTİĞİ. */
+  --primary: #1c357f;
+  --primary-hover: #16295f;
+  --primary-subtle: #eef2fa;
+  --primary-border: #c3d0ea;
+  --focus-ring: #1c357f;
+  --hero-accent: var(--primary);
 
-  --sidebar-bg: #ffffff;
+  --accent: var(--primary);
+  --accent-hover: var(--primary-hover);
+  --accent-subtle: var(--primary-subtle);
+
+  /* Veri görselleştirme — status renklerinden bağımsız, nötr seri kimliği. */
+  --data-primary: #1c357f;
+  --data-secondary: #8586a7;
+  --data-grid: #e2e8f0;
+  --data-axis: #cbd5e1;
+  --data-target: #8586a7;
+  --data-tooltip-bg: #ffffff;
+
+  /* Status semantiği — sabit hex'ler (bkz. RENK SEMANTİĞİ). */
+  --status-negative: #e90128;
+  --status-negative-bg: color-mix(in srgb, #e90128 9%, transparent);
+  --status-negative-border: color-mix(in srgb, #e90128 28%, transparent);
+  --status-positive: #15803d;
+  --status-positive-bg: color-mix(in srgb, #15803d 9%, transparent);
+  --status-positive-border: color-mix(in srgb, #15803d 28%, transparent);
+  --status-neutral: #ca8a04;
+  --status-neutral-bg: color-mix(in srgb, #ca8a04 10%, transparent);
+  --status-neutral-border: color-mix(in srgb, #ca8a04 30%, transparent);
+  --status-info: #1d4ed8;
+  --status-info-bg: color-mix(in srgb, #1d4ed8 8%, transparent);
+  --status-info-border: color-mix(in srgb, #1d4ed8 26%, transparent);
+  --status-unknown: var(--text-muted);
+  --status-unknown-bg: color-mix(in srgb, #9ca3af 12%, transparent);
+  --status-unknown-border: color-mix(in srgb, #9ca3af 30%, transparent);
+
+  --sidebar-bg: #fbfaf8;
   --sidebar-border: #e5e7eb;
   --sidebar-heading: #111827;
-  --sidebar-subtext: #9ca3af;
+  --sidebar-subtext: #6b7280;
   --sidebar-text: #4b5563;
-  --sidebar-text-hover: #e90128;
-  --sidebar-active-bg: #fdecee;
-  --sidebar-text-active: #e90128;
-  --sidebar-muted: #d1d5db;
+  --sidebar-text-hover: var(--primary);
+  --sidebar-active-bg: color-mix(in srgb, var(--primary) 7%, var(--sidebar-bg));
+  --sidebar-text-active: var(--primary);
+  --sidebar-active-indicator: var(--primary);
+  --sidebar-muted: #6b7280;
+
+  --leader-gold: #e9a72f;
+}
+
+/* Responsive density sistemi (bkz. CLAUDE.md görev talimatı "Windows
+   ölçeklendirme/viewport tutarlılığı"). Amaç: Windows %150 ölçeklendirmede
+   ~1280px CSS viewport'a düşen 1920x1080 ekranlarda, tarayıcı zoom/transform
+   hack'i olmadan masaüstü yerleşimini korumak — önce yoğunluk azalır
+   (padding/gap/font/sidebar küçülür), reflow (kolon sayısı azaltma) en son
+   çare olarak component bazında ayrıca uygulanır (bkz. grid className'leri).
+   Üç viewport katmanı, dar olan en sonda kazanacak şekilde sırayla ezilir:
+     ≥1600px  Wide desktop     — referans görünüm (1920x1080 @ %100), değişmez
+     1440-1599 Standard desktop — küçük azaltma
+     ≤1439px  Compact desktop  — 1920x1080 @ %150 (~1280px) burada karşılanır
+   1199px altı için ayrı bir token katmanı yok: o noktadan sonra yoğunluk
+   yerine component'lerin kendi grid reflow breakpoint'leri devreye girer. */
+:root {
+  --space-page-padding: 1.5rem;
+  --space-header-y: 0.875rem;
+  --space-card-padding: 1.25rem;
+  --space-card-padding-sm: 1rem;
+  --space-card-header-gap: 1rem;
+  --space-section-gap: 1rem;
+  --space-card-gap: 0.75rem;
+  --space-compact-padding: 0.625rem;
+  --sidebar-width: 15rem;
+  --icon-badge-size: 2rem;
+}
+
+@media (max-width: 1599px) {
+  :root {
+    --space-page-padding: 1.25rem;
+    --space-header-y: 0.75rem;
+    --space-card-padding: 1.125rem;
+    --space-card-header-gap: 0.875rem;
+    --space-section-gap: 0.875rem;
+    --space-card-gap: 0.625rem;
+    --sidebar-width: 14rem;
+  }
+}
+
+@media (max-width: 1439px) {
+  :root {
+    --space-page-padding: 1rem;
+    --space-header-y: 0.625rem;
+    --space-card-padding: 0.875rem;
+    --space-card-padding-sm: 0.75rem;
+    --space-card-header-gap: 0.625rem;
+    --space-section-gap: 0.75rem;
+    --space-card-gap: 0.5rem;
+    --space-compact-padding: 0.5rem;
+    --sidebar-width: 13rem;
+    --icon-badge-size: 1.625rem;
+  }
 }
 
 * {
@@ -96,4 +254,209 @@ input,
 select,
 textarea {
   accent-color: var(--accent);
+}
+
+/* Tailwind Preflight, buton imlecini tarayıcı varsayılanına (cursor: default)
+   bırakır — <a> gibi otomatik "pointer" imleci vermez. Sistemdeki her
+   tıklanabilir buton aynı el imlecini göstersin diye burada geri açılır. */
+button:not(:disabled) {
+  cursor: pointer;
+}
+
+/* Paylaşılan liste tablosu görünümü (bkz. lib/tableStyles.ts::tableClass) —
+   zebra striping + hover, sayısal okunabilirliği bozmadan satır takibini kolaylaştırır. */
+.app-table tbody tr:nth-child(even) {
+  background: var(--row-alternate);
+}
+
+.app-table tbody tr:hover {
+  background: var(--row-hover);
+}
+
+.sidebar-nav-item:hover {
+  background: color-mix(in srgb, var(--primary) 4%, transparent);
+}
+
+/* Formen Performans Karşılaştırması matrisi — Formen/Genel Puan kolonları yatay
+   scroll sırasında sabit kalır. Sticky hücreler kendi arka planını taşımalı,
+   yoksa scroll eden KPI kolonları altlarından görünür; satır hover/ortalama
+   durumlarını da bu yüzden burada (tr durumuna göre) ayrıca eşliyoruz. */
+.fc-table {
+  table-layout: fixed;
+  border-collapse: separate;
+  border-spacing: 0;
+}
+
+.fc-col-sticky {
+  position: sticky;
+  z-index: 2;
+  background: var(--surface);
+}
+
+.fc-table tbody tr:hover .fc-col-sticky {
+  background: var(--row-hover);
+}
+
+.fc-table tbody tr.fc-row-average .fc-col-sticky {
+  background: var(--surface-muted);
+}
+
+/* Sidebar liderlik kartları (bkz. PerformanceLeadersPanel) — taban rengi ve
+   soft tonlar inline style ile hesaplanır, yalnızca :hover geçişi burada. */
+.leader-card-clickable {
+  transition: background-color 0.15s ease, border-color 0.15s ease, transform 0.15s ease;
+}
+.leader-card-clickable:hover {
+  transform: translateY(-1px);
+}
+.leader-card-gold {
+  background: color-mix(in srgb, var(--leader-gold) 8%, var(--sidebar-bg));
+  border-color: color-mix(in srgb, var(--leader-gold) 26%, var(--sidebar-border));
+}
+.leader-card-gold.leader-card-clickable:hover {
+  background: color-mix(in srgb, var(--leader-gold) 15%, var(--sidebar-bg));
+  border-color: color-mix(in srgb, var(--leader-gold) 45%, var(--sidebar-border));
+}
+.leader-card-navy {
+  background: color-mix(in srgb, var(--primary) 8%, var(--sidebar-bg));
+  border-color: color-mix(in srgb, var(--primary) 22%, var(--sidebar-border));
+}
+.leader-card-navy.leader-card-clickable:hover {
+  background: color-mix(in srgb, var(--primary) 15%, var(--sidebar-bg));
+  border-color: color-mix(in srgb, var(--primary) 38%, var(--sidebar-border));
+}
+
+/* Semantic typography scale (bkz. CLAUDE.md görev talimatı "TYPOGRAPHY") —
+   yoğun kullanılan text-[10px]..text-[13px] serbest değerleri yerine, anlamına
+   göre adlandırılmış sabit ölçekler. rem tabanlı: tarayıcı yakınlaştırması bozulmaz. */
+.text-display-metric {
+  font-size: 2.125rem;
+  line-height: 1.15;
+  font-weight: 700;
+  letter-spacing: -0.01em;
+  font-variant-numeric: tabular-nums;
+}
+.text-hero-score {
+  font-size: 2.5rem;
+  line-height: 1.1;
+  font-weight: 700;
+  letter-spacing: -0.02em;
+  font-variant-numeric: tabular-nums;
+}
+.text-hero-metric {
+  font-size: 1.5rem;
+  line-height: 1.25;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+}
+.text-page-title {
+  font-size: 1.375rem;
+  line-height: 1.3;
+  font-weight: 700;
+  letter-spacing: -0.01em;
+}
+@media (min-width: 640px) {
+  .text-page-title {
+    font-size: 1.5rem;
+  }
+}
+@media (min-width: 1024px) {
+  .text-page-title {
+    font-size: 1.625rem;
+  }
+}
+.text-section-title {
+  font-size: 0.8125rem;
+  line-height: 1.3;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+.text-card-title {
+  font-size: 0.875rem;
+  line-height: 1.3;
+  font-weight: 600;
+}
+.text-body {
+  font-size: 0.8125rem;
+  line-height: 1.45;
+  font-weight: 400;
+}
+.text-label {
+  font-size: 0.6875rem;
+  line-height: 1.3;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+.text-metadata {
+  font-size: 0.6875rem;
+  line-height: 1.4;
+  font-weight: 500;
+}
+.text-table {
+  font-size: 0.8125rem;
+  line-height: 1.3;
+  font-variant-numeric: tabular-nums;
+}
+
+/* Compact/standard desktop katmanlarında semantic type scale küçülür — bkz.
+   yukarıdaki "Responsive density sistemi" notu. Aynı --space-* mantığı: dar
+   katman en sonda tanımlanır ki iki media query de geçerliyken o kazansın. */
+@media (max-width: 1599px) {
+  .text-hero-score {
+    font-size: 2.25rem;
+  }
+  .text-hero-metric {
+    font-size: 1.375rem;
+  }
+  .text-display-metric {
+    font-size: 1.9375rem;
+  }
+}
+
+@media (max-width: 1439px) {
+  .text-hero-score {
+    font-size: 2rem;
+  }
+  .text-hero-metric {
+    font-size: 1.1875rem;
+  }
+  .text-display-metric {
+    font-size: 1.75rem;
+  }
+  .text-page-title {
+    font-size: 1.25rem;
+  }
+  .text-section-title {
+    font-size: 0.75rem;
+  }
+  .text-card-title {
+    font-size: 0.8125rem;
+  }
+  .text-body {
+    font-size: 0.75rem;
+  }
+  .text-label {
+    font-size: 0.625rem;
+  }
+  .text-metadata {
+    font-size: 0.625rem;
+  }
+  .text-table {
+    font-size: 0.75rem;
+  }
+}
+
+/* prefers-reduced-motion: mevcut transition/transform animasyonları (hover
+   translate, spin vb.) hareket hassasiyeti olan kullanıcılar için kapatılır. */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.001ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.001ms !important;
+    scroll-behavior: auto !important;
+  }
 }

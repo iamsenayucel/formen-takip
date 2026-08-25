@@ -1,14 +1,26 @@
+import uuid
 from datetime import date
 
 import pytest
 
+from app.models.foreman import ForemanAssignment
 from app.services.monthly_foreman_report import (
     _classify_trend_shape,
     _compare_to_reference,
     _month_bounds,
     _previous_month,
+    group_assignment_episodes,
     is_month_completed,
 )
+
+
+def _assignment(
+    foreman_id, plant_id, chief_id, shift_id, start_date, end_date=None,
+):
+    return ForemanAssignment(
+        id=uuid.uuid4(), foreman_id=foreman_id, plant_id=plant_id, chief_id=chief_id,
+        shift_id=shift_id, start_date=start_date, end_date=end_date, is_active=end_date is None,
+    )
 
 
 class TestMonthBounds:
@@ -90,3 +102,32 @@ class TestClassifyTrendShape:
 
     def test_volatile_scores(self):
         assert _classify_trend_shape([95.0, 60.0, 95.0, 60.0]) == "dalgalı"
+
+
+class TestGroupAssignmentEpisodes:
+    def test_single_episode_multiple_plants_grouped_together(self):
+        foreman_id, chief_id, shift_id = uuid.uuid4(), uuid.uuid4(), uuid.uuid4()
+        plant_a, plant_b = uuid.uuid4(), uuid.uuid4()
+        assignments = [
+            _assignment(foreman_id, plant_a, chief_id, shift_id, date(2026, 8, 1)),
+            _assignment(foreman_id, plant_b, chief_id, shift_id, date(2026, 8, 1)),
+        ]
+        episodes = group_assignment_episodes(assignments)
+        assert len(episodes) == 1
+        assert len(episodes[0]) == 2
+
+    def test_two_episodes_ordered_by_start_date(self):
+        foreman_id, shift_id = uuid.uuid4(), uuid.uuid4()
+        chief_a, chief_b = uuid.uuid4(), uuid.uuid4()
+        plant_a, plant_b = uuid.uuid4(), uuid.uuid4()
+        assignments = [
+            _assignment(foreman_id, plant_b, chief_b, shift_id, date(2026, 8, 16)),
+            _assignment(foreman_id, plant_a, chief_a, shift_id, date(2026, 8, 1), date(2026, 8, 15)),
+        ]
+        episodes = group_assignment_episodes(assignments)
+        assert len(episodes) == 2
+        assert episodes[0][0].start_date == date(2026, 8, 1)
+        assert episodes[1][0].start_date == date(2026, 8, 16)
+
+    def test_empty_input_returns_empty_list(self):
+        assert group_assignment_episodes([]) == []

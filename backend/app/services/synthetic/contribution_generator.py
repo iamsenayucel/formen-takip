@@ -2,13 +2,14 @@ from __future__ import annotations
 
 import random
 from dataclasses import dataclass, field
-from datetime import date, datetime, timedelta, timezone
+from datetime import timedelta
 from uuid import UUID
 
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from app.models.contribution import ContributionGain, ContributionWork, ContributionWorkForeman
+from app.core import clock
+from app.models.contribution import ContributionGain, ContributionWork, ContributionWorkForeman, ContributionWorkPlant
 from app.models.enums import (
     ContributionRole,
     ContributionStatus,
@@ -21,7 +22,6 @@ from app.models.enums import (
     RepeatPeriod,
     SuccessDirection,
     TimeUnit,
-    VerifyingDepartment,
 )
 from app.models.foreman import Foreman, ForemanAssignment
 from app.models.organization import Plant
@@ -67,6 +67,26 @@ _TITLE_TEMPLATES: dict[ContributionWorkType, list[str]] = {
     ContributionWorkType.DIGITALIZATION: [
         "Vardiya Raporlarının Dijitalleştirilmesi", "Manuel Takip Formunun Otomasyonu",
         "Üretim Verisinin Gerçek Zamanlı İzlenmesi", "Kağıt Bazlı Kontrol Listesinin Dijitalleştirilmesi",
+    ],
+    ContributionWorkType.FIVE_S: [
+        "Saha Düzeninde 5S Uygulaması", "İş İstasyonunda 5S ile Düzen ve Temizlik Standardı",
+        "Malzeme Alanının 5S Metoduyla Yeniden Düzenlenmesi", "Görsel Yönetim Panosuyla 5S Standardının Sürdürülmesi",
+    ],
+    ContributionWorkType.VARIETY_CHANGEOVER_EFFICIENCY: [
+        "Çeşit Dönüşü Süresinin Kısaltılması", "Ürün Geçişlerinde Ayar Kaybının Azaltılması",
+        "Çeşit Değişiminde Standart İş Akışının Oluşturulması", "Reçete Değişimi Verimliliğinin Artırılması",
+    ],
+    ContributionWorkType.STAFF_SAVING: [
+        "İş Akışının Sadeleştirilmesiyle Personel Tasarrufu", "Görev Dağılımının Yeniden Düzenlenmesi",
+        "Otomasyonla Personel İhtiyacının Azaltılması", "Vardiya Başına Gerekli Personel Sayısının Optimize Edilmesi",
+    ],
+    ContributionWorkType.CUSTOMER_COMPLAINT: [
+        "Müşteri Şikayetinin Kök Sebep Analiziyle Giderilmesi", "Tekrarlayan Müşteri Şikayetinin Kalıcı Çözümü",
+        "Sevkiyat Öncesi Kontrolle Müşteri Şikayetinin Önlenmesi", "Müşteri Geri Bildiriminin Sürece Entegre Edilmesi",
+    ],
+    ContributionWorkType.POKA_YOKE: [
+        "Hatalı Montajı Önleyen Poka Yoke Düzeneği", "Ekipmana Poka Yoke Sensörü Eklenmesi",
+        "Yanlış Parça Kullanımını Engelleyen Poka Yoke Uygulaması", "Kontrol Adımının Poka Yoke ile Otomatikleştirilmesi",
     ],
     ContributionWorkType.OTHER: [
         "Saha Düzeninde İyileştirme Çalışması", "Ekip İçi İletişim Sürecinin İyileştirilmesi",
@@ -115,6 +135,26 @@ _SUMMARY_TEMPLATES: dict[ContributionWorkType, list[str]] = {
         "Manuel takip süreci dijital bir çözümle değiştirildi.",
         "Kağıt üzerinde yürütülen süreç dijital bir araca taşınarak hızlandırıldı.",
     ],
+    ContributionWorkType.FIVE_S: [
+        "Saha 5S adımlarıyla düzenlenip görsel standart oluşturuldu.",
+        "Gereksiz malzemeler kaldırılıp çalışma alanı 5S ilkeleriyle yeniden düzenlendi.",
+    ],
+    ContributionWorkType.VARIETY_CHANGEOVER_EFFICIENCY: [
+        "Çeşit dönüşü adımları standartlaştırılarak geçiş süresi kısaltıldı.",
+        "Ayar parametreleri önceden hazırlanarak çeşit dönüşü verimliliği artırıldı.",
+    ],
+    ContributionWorkType.STAFF_SAVING: [
+        "Süreç sadeleştirilerek aynı işi daha az personelle yürütmek mümkün hale geldi.",
+        "Görev dağılımı yeniden planlanarak personel ihtiyacı azaltıldı.",
+    ],
+    ContributionWorkType.CUSTOMER_COMPLAINT: [
+        "Müşteri şikayetinin kök sebebi bulunup kalıcı önlem alındı.",
+        "Şikayete konu olan süreç adımı yeniden tasarlanarak tekrarı önlendi.",
+    ],
+    ContributionWorkType.POKA_YOKE: [
+        "Hata payını ortadan kaldıran bir poka yoke düzeneği devreye alındı.",
+        "Yanlış işlem yapılmasını fiziksel olarak engelleyen bir çözüm uygulandı.",
+    ],
     ContributionWorkType.OTHER: [
         "Sahada tespit edilen bir iyileştirme fırsatı hayata geçirildi.",
         "Ekip tarafından fark edilen bir aksaklık kalıcı olarak giderildi.",
@@ -137,7 +177,10 @@ _RESULT_TEMPLATES = [
     "İyileştirme, ilgili tesis yönetimiyle paylaşılarak onaylandı.",
 ]
 
-_TIME_SAVING_TYPES = {ContributionWorkType.SMED, ContributionWorkType.TIME_SAVING, ContributionWorkType.PRODUCTION_EFFICIENCY}
+_TIME_SAVING_TYPES = {
+    ContributionWorkType.SMED, ContributionWorkType.TIME_SAVING, ContributionWorkType.PRODUCTION_EFFICIENCY,
+    ContributionWorkType.VARIETY_CHANGEOVER_EFFICIENCY,
+}
 _OTHER_GAIN_BY_TYPE: dict[ContributionWorkType, list[OtherGainType]] = {
     ContributionWorkType.QUALITY_IMPROVEMENT: [OtherGainType.QUALITY_DEFECT_REDUCTION],
     ContributionWorkType.SAFETY_IMPROVEMENT: [OtherGainType.SAFETY_RISK_REDUCTION],
@@ -145,6 +188,9 @@ _OTHER_GAIN_BY_TYPE: dict[ContributionWorkType, list[OtherGainType]] = {
     ContributionWorkType.PRODUCTION_EFFICIENCY: [OtherGainType.CAPACITY_INCREASE, OtherGainType.DOWNTIME_REDUCTION],
     ContributionWorkType.COST_REDUCTION: [OtherGainType.SCRAP_REDUCTION, OtherGainType.LABOR_SAVING],
     ContributionWorkType.KAIZEN: [OtherGainType.GSF_REDUCTION, OtherGainType.SLOW_RUNNING_REDUCTION],
+    ContributionWorkType.STAFF_SAVING: [OtherGainType.LABOR_SAVING],
+    ContributionWorkType.CUSTOMER_COMPLAINT: [OtherGainType.QUALITY_DEFECT_REDUCTION],
+    ContributionWorkType.POKA_YOKE: [OtherGainType.QUALITY_DEFECT_REDUCTION, OtherGainType.SCRAP_REDUCTION],
 }
 
 
@@ -168,24 +214,43 @@ def _foremen_by_plant(db: Session) -> dict[UUID, list[Foreman]]:
     return result
 
 
+def _plants_by_foreman(db: Session) -> dict[UUID, list[UUID]]:
+    result: dict[UUID, list[UUID]] = {}
+    rows = db.execute(
+        select(ForemanAssignment.foreman_id, ForemanAssignment.plant_id).where(ForemanAssignment.is_active.is_(True))
+    ).all()
+    for foreman_id, plant_id in rows:
+        result.setdefault(foreman_id, []).append(plant_id)
+    return result
+
+
 def seed_contribution_works(
-    db: Session, rng: random.Random, admin_user_id: UUID, count: int = 40
+    db: Session, rng: random.Random, creator_subject: str, count: int = 40
 ) -> ContributionSeedResult:
     plants = list(db.scalars(select(Plant).where(Plant.is_active.is_(True))))
     foremen_by_plant = _foremen_by_plant(db)
+    plants_by_foreman = _plants_by_foreman(db)
     eligible_plants = [p for p in plants if foremen_by_plant.get(p.id)]
     if not eligible_plants:
         return ContributionSeedResult()
 
     result = ContributionSeedResult()
     work_types = list(ContributionWorkType)
-    today = date.today()
+    today = clock.today_local()
     used_title_summary: set[tuple[str, str]] = set()
 
     for _ in range(count):
         plant = rng.choice(eligible_plants)
         plant_foremen = foremen_by_plant[plant.id]
         chosen_foremen = rng.sample(plant_foremen, k=min(len(plant_foremen), rng.randint(1, 3)))
+
+        zone_plant_ids = {plant.id}
+        for foreman in chosen_foremen:
+            zone_plant_ids.update(plants_by_foreman.get(foreman.id, []))
+        work_plant_ids = [plant.id] + rng.sample(
+            sorted(zone_plant_ids - {plant.id}, key=str),
+            k=min(len(zone_plant_ids) - 1, rng.randint(0, 2)),
+        )
         work_type = rng.choice(work_types)
         is_published = rng.random() < 0.8
         work_date = today - timedelta(days=rng.randint(1, 300))
@@ -200,20 +265,13 @@ def seed_contribution_works(
 
         has_financial = rng.random() < 0.6
         financial_gain_status = FinancialGainStatus.NOT_CALCULATED
-        estimated_amount = verified_amount = None
+        gain_amount = None
         currency = gain_period = None
-        is_gain_verified = False
-        verified_by_department = verification_date = None
         if has_financial:
             financial_gain_status = FinancialGainStatus.YES
-            estimated_amount = round(rng.uniform(5_000, 300_000), 2)
+            gain_amount = round(rng.uniform(5_000, 300_000), 2)
             currency = Currency.TRY
             gain_period = rng.choice(list(GainPeriod))
-            is_gain_verified = rng.random() < 0.5
-            if is_gain_verified:
-                verified_amount = round(estimated_amount * rng.uniform(0.7, 1.05), 2)
-                verified_by_department = rng.choice(list(VerifyingDepartment))
-                verification_date = work_date + timedelta(days=rng.randint(3, 30))
 
         previous_duration = new_duration = duration_unit = repeat_period = repeat_count = None
         per_occurrence_saving = monthly_total_saving_minutes = None
@@ -234,21 +292,21 @@ def seed_contribution_works(
             problem_description=rng.choice(_PROBLEM_TEMPLATES),
             solution_description=rng.choice(_SOLUTION_TEMPLATES),
             result_description=rng.choice(_RESULT_TEMPLATES),
-            plant_id=plant.id, work_date=work_date,
-            impact_level=impact_level, created_by_user_id=admin_user_id,
+            work_date=work_date,
+            impact_level=impact_level, created_by_subject=creator_subject,
             is_standardized=rng.random() < 0.35, is_applicable_other_plants=rng.random() < 0.3,
             is_permanent_solution=rng.random() < 0.5, work_instruction_updated=rng.random() < 0.25,
-            financial_gain_status=financial_gain_status, estimated_amount=estimated_amount,
-            verified_amount=verified_amount, currency=currency, gain_period=gain_period,
-            is_gain_verified=is_gain_verified, verified_by_department=verified_by_department,
-            verification_date=verification_date,
+            financial_gain_status=financial_gain_status, gain_amount=gain_amount,
+            currency=currency, gain_period=gain_period,
             previous_duration=previous_duration, new_duration=new_duration, duration_unit=duration_unit,
             repeat_period=repeat_period, repeat_count=repeat_count,
             per_occurrence_saving=per_occurrence_saving, monthly_total_saving_minutes=monthly_total_saving_minutes,
-            published_at=datetime.now(timezone.utc) if is_published else None,
+            published_at=clock.now_utc() if is_published else None,
         )
         db.add(work)
         db.flush()
+
+        work_gains: list[ContributionGain] = []
 
         lead_foreman_id = chosen_foremen[0].id if chosen_foremen else None
         if len(chosen_foremen) > 1:
@@ -256,6 +314,9 @@ def seed_contribution_works(
         for foreman in chosen_foremen:
             role = ContributionRole.LEAD if foreman.id == lead_foreman_id else ContributionRole.CONTRIBUTOR
             db.add(ContributionWorkForeman(work_id=work.id, foreman_id=foreman.id, role=role))
+
+        for plant_id in work_plant_ids:
+            db.add(ContributionWorkPlant(work_id=work.id, plant_id=plant_id))
 
         gain_type_options = _OTHER_GAIN_BY_TYPE.get(work_type)
         if gain_type_options and rng.random() < 0.7:
@@ -267,12 +328,14 @@ def seed_contribution_works(
             else:
                 next_value = round(previous_value * rng.uniform(0.5, 0.85), 2)
             amount, percent = calc.compute_change(previous_value, next_value)
-            db.add(
-                ContributionGain(
-                    work_id=work.id, gain_type=gain_type, previous_value=previous_value, next_value=next_value,
-                    change_amount=amount, change_percent=percent, unit="%", measurement_period="Aylık",
-                )
+            gain = ContributionGain(
+                work_id=work.id, gain_type=gain_type, previous_value=previous_value, next_value=next_value,
+                change_amount=amount, change_percent=percent, unit="%", measurement_period="Aylık",
             )
+            db.add(gain)
+            work_gains.append(gain)
+
+        work.contribution_score = calc.compute_contribution_score(work, work_gains)[0]
 
         result.works_created += 1
         if is_published:

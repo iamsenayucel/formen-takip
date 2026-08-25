@@ -3,6 +3,7 @@ export interface PerformanceLevel {
   description: string;
   color: string;
   icon: string;
+  outstandingPerformance?: boolean | null;
 }
 
 export interface FactoryOption {
@@ -16,24 +17,24 @@ export interface PlantOption {
   id: string;
   code: string;
   name: string;
-  sequence_number: number;
-  factory_id: string;
+  sequenceNumber: number;
+  factoryId: string;
 }
 
 export interface ChiefOption {
   id: string;
-  employee_number: string;
+  employeeNumber: string;
   name: string;
-  plant_ids: string[];
+  plantIds: string[];
 }
 
 export interface FilterOption {
   id: string;
-  code?: string;
+  code?: string | null;
   name: string;
-  sequence?: number;
-  unit?: string;
-  weight?: number;
+  sequence?: number | null;
+  unit?: string | null;
+  weight?: number | null;
 }
 
 export interface FilterOptionsResponse {
@@ -51,78 +52,118 @@ export interface EntityRef {
   score?: number;
 }
 
+export interface ApiError {
+  code: string;
+  message: string;
+  requestId: string;
+  timestamp: string;
+  details?: { fields?: { field: string; reason: string; code?: string }[] } & Record<string, unknown> | null;
+}
+
+export interface CursorPagination {
+  nextCursor: string | null;
+  hasMore: boolean;
+  total: number | null;
+}
+
+export interface CursorPage<T> {
+  items: T[];
+  pagination: CursorPagination;
+}
+
 export interface DashboardSummary {
-  total_plants: number;
-  active_plants: number;
-  total_active_foremen: number;
-  avg_company_score: number;
-  foremen_above_target: number;
-  foremen_below_target: number;
-  foremen_critical: number;
-  foremen_excellent: number;
-  best_plant: EntityRef | null;
-  worst_plant: EntityRef | null;
-  best_shift: EntityRef | null;
-  worst_shift: EntityRef | null;
-  best_foreman: (EntityRef & { employee_number?: string }) | null;
-  weakest_kpi: { id: string; name: string; avg_score: number } | null;
-  plants_with_missing_data: number;
-  last_sync_at: string | null;
-  data_source: string;
+  totalPlants: number;
+  activePlants: number;
+  totalActiveForemen: number;
+  avgCompanyScore: number;
+  foremenAboveTarget: number;
+  foremenBelowTarget: number;
+  foremenCritical: number;
+  foremenSuccessful: number;
+  foremenOutstanding: number;
+  bestPlant: EntityRef | null;
+  worstPlant: EntityRef | null;
+  bestShift: EntityRef | null;
+  worstShift: EntityRef | null;
+  bestForeman: (EntityRef & { employeeNumber?: string }) | null;
+  weakestKpi: { id: string; name: string; avgScore: number } | null;
+  plantsWithMissingData: number;
+  lastSyncAt: string | null;
+  dataSource: string;
 }
 
 export interface TrendPoint {
   date: string;
-  total_score: number;
-  is_reliable: boolean;
+  totalScore: number;
+  isReliable: boolean;
 }
 
 export interface KpiSummaryItem {
-  kpi_id: string;
+  kpiId: string;
   code: string;
   name: string;
   unit: string;
-  avg_score: number;
-  avg_target: number | null;
-  avg_actual: number | null;
-  record_count: number;
+  avgScore: number;
+  avgTarget: number | null;
+  avgActual: number | null;
+  recordCount?: number;
 }
 
 export interface PlantRankingItem {
-  plant_id: string;
+  plantId: string;
   code: string;
   name: string;
-  total_score: number;
-  is_reliable: boolean;
+  totalScore: number;
+  isReliable: boolean;
   level: PerformanceLevel;
 }
 
 export interface ShiftComparisonItem {
-  shift_id: string;
+  shiftId: string;
+  code: string | null;
+  name: string | null;
+  totalScore: number;
+  recordCount: number;
+  level: PerformanceLevel;
+}
+
+export interface PlantShiftItem {
+  shiftId: string;
   code: string;
   name: string;
-  total_score: number;
-  record_count: number;
+  totalScore: number;
   level: PerformanceLevel;
 }
 
 export interface ForemanRankingItem {
-  foreman_id: string;
-  employee_number: string;
-  full_name: string;
-  total_score: number;
-  is_reliable: boolean;
+  foremanId: string;
+  employeeNumber: string;
+  fullName: string;
+  operationalScore: number;
+  contributionBonus: number;
+  generalPerformanceScore: number;
+  isReliable: boolean;
+  level: PerformanceLevel;
+}
+
+export interface PlantForemanItem {
+  foremanId: string;
+  employeeNumber: string | null;
+  fullName: string | null;
+  operationalScore: number;
+  contributionBonus: number;
+  generalPerformanceScore: number;
   level: PerformanceLevel;
 }
 
 export interface ForemanTrendRankingItem {
-  foreman_id: string;
-  employee_number: string;
-  full_name: string;
-  total_score: number;
-  previous_score: number;
+  foremanId: string;
+  employeeNumber: string;
+  fullName: string;
+  operationalScore: number;
+  previousOperationalScore: number;
   delta: number;
-  is_reliable: boolean;
+  isReliable: boolean;
   level: PerformanceLevel;
 }
 
@@ -130,44 +171,94 @@ export interface DistributionItem extends PerformanceLevel {
   count: number;
 }
 
+export interface PerformanceDistributionResponse {
+  items: DistributionItem[];
+  outstandingCount: number;
+}
+
+export interface PerformanceLeaderEntry {
+  foremanId: string;
+  fullName: string;
+  generalPerformanceScore: number;
+}
+
+export interface PerformanceYearLeaderEntry extends PerformanceLeaderEntry {
+  monthlyWins: number;
+}
+
+export interface PerformanceLeadersResponse {
+  year: number;
+  lastCalculatedMonth: { year: number; month: number; label: string };
+  monthlyLeader: PerformanceLeaderEntry | null;
+  yearlyLeader: PerformanceYearLeaderEntry | null;
+}
+
+export interface DashboardSnapshot {
+  summary: DashboardSummary;
+  kpiSummary: { items: KpiSummaryItem[] };
+  shiftComparison: { items: ShiftComparisonItem[] };
+  foremanRanking: {
+    top: { items: ForemanRankingItem[] };
+    bottom: { items: ForemanRankingItem[] };
+  };
+  foremanTrendRanking: {
+    improving: { items: ForemanTrendRankingItem[] };
+    declining: { items: ForemanTrendRankingItem[] };
+  };
+  performanceDistribution: PerformanceDistributionResponse;
+}
+
+export interface PlantGroupRef {
+  id: string;
+  code: string;
+  score: number;
+  supervisor: { id: string; name: string };
+  foremen: { id: string; name: string }[];
+}
+
 export interface PlantListItem {
   id: string;
   code: string;
   name: string;
-  sequence_number: number;
+  sequenceNumber: number;
   factory: { id: string; code: string; name: string } | null;
-  is_active: boolean;
-  total_score: number;
+  isActive: boolean;
+  totalScore: number;
   level: PerformanceLevel;
-  active_foreman_count: number;
-  record_count: number;
+  activeForemanCount: number;
+  recordCount: number;
+  group: PlantGroupRef | null;
 }
 
 export interface PlantDetail {
   id: string;
   code: string;
   name: string;
-  sequence_number: number;
+  sequenceNumber: number;
   factory: { id: string; code: string; name: string } | null;
   description: string | null;
-  is_active: boolean;
-  sap_plant_code: string | null;
+  isActive: boolean;
+  sapPlantCode: string | null;
+}
+
+export interface PlantSummary {
+  plantId: string;
+  totalScore: number;
+  level: PerformanceLevel;
+  foremenAverageScore: number;
+  activeForemanCount: number;
+  criticalForemanCount: number;
+  strongestKpi: { id: string; name: string; avgScore: number } | null;
+  weakestKpi: { id: string; name: string; avgScore: number } | null;
 }
 
 export interface PlantChiefItem {
   id: string;
-  employee_number: string;
-  full_name: string;
-  foreman_count: number;
-  total_score: number;
+  employeeNumber: string;
+  fullName: string;
+  foremanCount: number;
+  totalScore: number;
   level: PerformanceLevel;
-}
-
-export interface PagedResponse<T> {
-  items: T[];
-  total: number;
-  page: number;
-  page_size: number;
 }
 
 export interface ForemanAssignmentItem {
@@ -177,137 +268,200 @@ export interface ForemanAssignmentItem {
 
 export interface ForemanListItem {
   id: string;
-  employee_number: string;
-  full_name: string;
-  is_active: boolean;
+  employeeNumber: string;
+  fullName: string;
+  isActive: boolean;
   assignments: ForemanAssignmentItem[];
-  total_score: number;
-  is_reliable: boolean;
+  operationalScore: number;
+  contributionBonus: number;
+  generalPerformanceScore: number;
+  isReliable: boolean;
   level: PerformanceLevel;
+}
+
+export interface ContributionBonusBreakdownItem {
+  workId: string;
+  title: string;
+  workType: string | null;
+  score: number;
+  workDate: string;
 }
 
 export interface ForemanDetail {
   id: string;
-  employee_number: string;
-  full_name: string;
-  hire_date: string;
-  is_active: boolean;
-  phone_number: string | null;
+  employeeNumber: string;
+  fullName: string;
+  hireDate: string;
+  isActive: boolean;
+  phoneNumber: string | null;
   email: string | null;
   assignments: ForemanAssignmentItem[];
-  total_score: number;
-  is_reliable: boolean;
+  operationalScore: number;
+  contributionBonus: number;
+  contributionBonusBreakdown: ContributionBonusBreakdownItem[];
+  generalPerformanceScore: number;
+  isReliable: boolean;
+  inScope: boolean;
   level: PerformanceLevel;
-  company_rank: number | null;
-  company_total: number;
-  plant_rank: number | null;
-  plant_total: number;
+  companyRank: number | null;
+  companyTotal: number;
+  plantRank: number | null;
+  plantTotal: number;
 }
 
 export interface ChiefListItem {
   id: string;
-  employee_number: string;
-  full_name: string;
-  is_active: boolean;
+  employeeNumber: string;
+  code: string;
+  fullName: string;
+  isActive: boolean;
   plants: { id: string; name: string }[];
   factory: { id: string; code: string; name: string } | null;
-  foreman_count: number;
-  total_score: number;
-  is_reliable: boolean;
+  foremanCount: number;
+  totalScore: number;
+  isReliable: boolean;
   level: PerformanceLevel;
 }
 
 export interface ChiefDetail {
   id: string;
-  employee_number: string;
-  full_name: string;
-  hire_date: string;
-  is_active: boolean;
-  phone_number: string | null;
+  employeeNumber: string;
+  code: string;
+  fullName: string;
+  hireDate: string;
+  isActive: boolean;
+  phoneNumber: string | null;
   email: string | null;
   plants: { id: string; name: string }[];
   factory: { id: string; code: string; name: string } | null;
-  foreman_count: number;
-  total_score: number;
-  is_reliable: boolean;
+  foremanCount: number;
+  totalScore: number;
+  isReliable: boolean;
   level: PerformanceLevel;
-  company_rank: number | null;
-  company_total: number;
-  factory_rank: number | null;
-  factory_total: number;
+  companyRank: number | null;
+  companyTotal: number;
+  factoryRank: number | null;
+  factoryTotal: number;
 }
 
 export interface ChiefForemanItem {
   id: string;
-  employee_number: string | null;
-  full_name: string | null;
-  total_score: number;
-  is_reliable: boolean;
+  employeeNumber: string | null;
+  fullName: string | null;
+  operationalScore: number;
+  contributionBonus: number;
+  generalPerformanceScore: number;
+  isReliable: boolean;
   level: PerformanceLevel;
 }
 
 export interface ForemanKpiItem {
-  kpi_id: string;
+  kpiId: string;
   code: string;
   name: string;
   description: string | null;
   unit: string;
-  avg_target: number | null;
-  avg_actual: number | null;
-  avg_raw_score: number;
-  avg_capped_score: number;
+  avgTarget: number | null;
+  avgActual: number | null;
+  avgRawScore: number;
+  avgCappedScore: number;
   weight: number;
-  weighted_contribution_sum: number;
-  record_count: number;
-  calculation_version: number | null;
-  calculation_period: { date_from: string; date_to: string };
-  data_quality_status: string;
-  source_system: string;
-  agir_gitme?: {
-    signed_value: number;
-    absolute_value: number;
+  weightedContributionSum: number;
+  recordCount: number;
+  evaluatedPlantCount: number;
+  plants: {
+    plantId: string;
+    plantName: string | null;
+    actual: number;
+    target: number;
+    score: number;
+    weight: number;
+    recordCount: number;
+  }[];
+  calculationVersion: number | null;
+  calculationPeriod: { dateFrom: string; dateTo: string };
+  dataQualityStatus: string;
+  sourceSystem: string;
+  agirGitme?: {
+    signedValue: number;
+    absoluteValue: number;
     direction: "OVERWEIGHT" | "UNDERWEIGHT" | "ON_TARGET";
-    ratio_to_target: number | null;
+    ratioToTarget: number | null;
   };
   inkita?: {
-    included_total: number | null;
-    included_components: string[];
-    excluded_components: string[];
+    includedTotal: number | null;
+    includedComponents: string[];
+    excludedComponents: string[];
     note: string;
   };
-  plana_uyum?: {
-    avg_attainment_pct: number;
-    planned_qty: number | null;
-    actual_qty: number | null;
-    kg_diff: number | null;
-    signed_pct_deviation: number | null;
+  planaUyum?: {
+    avgAttainmentPct: number;
+    plannedQty: number | null;
+    actualQty: number | null;
+    kgDiff: number | null;
+    signedPctDeviation: number | null;
     direction: "ABOVE_PLAN" | "BELOW_PLAN" | "ON_PLAN";
   };
 }
 
-export interface CalculationDetail {
-  performance_date: string;
-  target_value: number | null;
-  actual_value: number | null;
+export interface ForemanComparisonKpiMeta {
+  kpiId: string;
+  code: string;
+  name: string;
   unit: string;
-  calculation_type: string | null;
-  calculation_rule_parameters: Record<string, number> | null;
-  calculation_version: number;
-  raw_score: number;
-  capped_score: number;
-  min_score: number | null;
-  max_score: number | null;
-  kpi_weight: number;
-  weighted_contribution: number;
-  data_source: string;
-  source_record_id: string;
-  plana_uyum?: {
-    planned_qty: number | null;
-    actual_qty: number | null;
-    kg_diff: number | null;
-    signed_pct_deviation: number | null;
+  decimalPlaces: number;
+  weight: number;
+}
+
+export interface ForemanComparisonKpiValue {
+  score: number;
+  actual: number | null;
+  target: number | null;
+  recordCount: number;
+}
+
+export interface ForemanComparisonItem {
+  id: string;
+  employeeNumber: string | null;
+  fullName: string | null;
+  totalScore: number;
+  isReliable: boolean;
+  level: PerformanceLevel;
+  kpiScores: Record<string, ForemanComparisonKpiValue | null>;
+}
+
+export interface ChiefForemanComparison {
+  kpis: ForemanComparisonKpiMeta[];
+  groupAverage: {
+    totalScore: number;
+    kpiScores: Record<string, number>;
+  };
+  foremen: ForemanComparisonItem[];
+}
+
+export interface CalculationDetail {
+  performanceDate: string;
+  targetValue: number | null;
+  actualValue: number | null;
+  unit: string;
+  calculationType: string | null;
+  calculationRuleParameters: Record<string, unknown> | null;
+  calculationVersion: number;
+  rawScore: number;
+  cappedScore: number;
+  minScore: number | null;
+  maxScore: number | null;
+  kpiWeight: number;
+  weightedContribution: number;
+  dataSource: string;
+  sourceRecordId: string;
+  planaUyum?: {
+    plannedQty: number | null;
+    actualQty: number | null;
+    kgDiff: number | null;
+    signedPctDeviation: number | null;
     status: "ABOVE_PLAN" | "BELOW_PLAN" | "ON_PLAN";
-    formula_version: number | null;
+    formulaVersion: number | null;
   };
 }
 
@@ -315,96 +469,112 @@ export interface AssignmentHistoryItem {
   plant: string | null;
   chief: string | null;
   shift: string | null;
-  start_date: string;
-  end_date: string | null;
-  is_active: boolean;
+  startDate: string;
+  endDate: string | null;
+  isActive: boolean;
 }
 
 export interface MonthlyReportComparison {
   value: number;
   diff: number;
-  diff_pct: number | null;
+  diffPct: number | null;
   status: "above" | "at" | "below";
-  is_favorable: boolean;
+  isFavorable: boolean;
 }
 
 export interface MonthlyReportKpiEntry {
-  kpi_id: string;
+  kpiId: string;
   code: string;
   name: string;
   unit: string;
   weight: number;
-  success_direction_higher: boolean;
-  has_data: boolean;
-  record_count: number;
+  successDirectionHigher: boolean;
+  hasData: boolean;
+  recordCount: number;
   actual: number | null;
   score: number | null;
   level: PerformanceLevel | null;
-  vs_personal_target: MonthlyReportComparison | null;
-  vs_factory_average: MonthlyReportComparison | null;
+  outstandingPerformance: boolean;
+  vsPersonalTarget: MonthlyReportComparison | null;
+  vsFactoryAverage: MonthlyReportComparison | null;
 }
 
 export interface MonthlyReportNote {
-  kpi_code: string;
+  kpiCode: string;
   name: string;
   text: string;
-  manager_prompt?: string;
+  managerPrompt?: string | null;
 }
 
 export interface MonthlyReportPreviousMonthKpi {
   code: string;
   name: string;
   diff: number;
-  is_improvement: boolean;
+  isImprovement: boolean;
 }
 
 export interface MonthlyReportData {
-  foreman: { id: string; employee_number: string; full_name: string; hire_date: string };
-  period: { year: number; month: number; label: string; date_from: string; date_to: string };
-  generated_at: string;
-  org: { factory_name: string | null; plants: { id: string; name: string }[]; chief_name: string | null } | null;
-  insufficient_data: boolean;
-  insufficient_data_reason?: string;
+  foreman: { id: string; employeeNumber: string; fullName: string; hireDate: string };
+  period: { year: number; month: number; label: string; dateFrom: string; dateTo: string };
+  generatedAt: string;
+  org: { factoryName: string | null; plants: { id: string; name: string }[]; chiefName: string | null } | null;
+  organizationHistory?: {
+    dateFrom: string;
+    dateTo: string;
+    factoryName: string | null;
+    plants: { id: string; name: string }[];
+    chiefName: string | null;
+  }[];
+  insufficientData: boolean;
+  insufficientDataReason?: string;
   overall: {
     score: number;
+    operationalScore: number;
+    contributionBonus: number;
     level: PerformanceLevel;
-    kpi_count: { total: number; above_or_at_target: number; below_target: number; critical: number };
+    kpiCount: { total: number; aboveOrAtTarget: number; belowTarget: number; critical: number };
   } | null;
-  summary_text?: string;
-  closing_text?: string;
+  summaryText?: string;
+  closingText?: string;
   kpis?: MonthlyReportKpiEntry[];
   strengths?: MonthlyReportNote[];
   improvements?: MonthlyReportNote[];
-  critical_attention?: MonthlyReportNote[];
-  congratulations?: { shown: boolean; text: string | null; kpi_codes: string[] };
+  criticalAttention?: MonthlyReportNote[];
+  congratulations?: { shown: boolean; text: string | null; kpiCodes: string[] };
   trend?: {
-    weekly_points: { bucket: string; total_score: number; is_reliable: boolean }[];
+    weeklyPoints: { bucket: string; totalScore: number; isReliable: boolean }[];
     shape: "iyileşme" | "kötüleşme" | "stabil" | "dalgalı" | null;
     text: string | null;
   };
-  previous_month?: {
+  previousMonth?: {
     available: boolean;
     label?: string;
-    overall_diff?: number;
-    per_kpi?: MonthlyReportPreviousMonthKpi[];
+    overallDiff?: number;
+    perKpi?: MonthlyReportPreviousMonthKpi[];
   };
 }
 
 export interface MonthlyReportSummary {
   year: number;
   month: number;
-  generated_at: string;
-  overall_score: number | null;
-  overall_level_name: string | null;
-  is_reliable: boolean;
+  generatedAt: string;
+  overallScore: number | null;
+  overallLevelName: string | null;
+  isReliable: boolean;
 }
 
 export interface MonthlyReportDetail extends MonthlyReportSummary {
-  report_data: MonthlyReportData;
+  reportData: MonthlyReportData;
 }
 
 export interface MonthlyReportLatest extends Partial<MonthlyReportDetail> {
   available: boolean;
+}
+
+export interface MonthlyReportAccess {
+  url: string;
+  expiresAt: string | null;
+  requiresAuth: boolean;
 }
 
 export interface KpiListItem {
@@ -413,34 +583,34 @@ export interface KpiListItem {
   name: string;
   description: string;
   unit: string;
-  calculation_type: string;
+  calculationType: string;
   weight: number;
-  default_target_value: number;
-  is_critical: boolean;
+  defaultTargetValue: number;
+  isCritical: boolean;
 }
 
 export interface KpiForemanValueItem {
-  foreman_id: string;
-  full_name: string | null;
-  avg_actual: number;
-  avg_target: number;
-  avg_score: number;
-  record_count: number;
+  foremanId: string;
+  fullName: string | null;
+  avgActual: number;
+  avgTarget: number;
+  avgScore: number;
+  recordCount: number;
   tier: "better" | "near" | "worse";
   level: PerformanceLevel | null;
 }
 
 export interface KpiAnalysis {
-  kpi: { id: string; code: string; name: string; unit: string; decimal_places: number };
-  company_avg_score: number;
-  company_avg_target: number | null;
-  company_avg_actual: number | null;
-  best_plants: EntityRef[];
-  worst_plants: EntityRef[];
-  shift_comparison: { id: string; name: string; score: number }[];
-  best_foremen: EntityRef[];
-  worst_foremen: EntityRef[];
-  foreman_values: KpiForemanValueItem[];
+  kpi: { id: string; code: string; name: string; unit: string; decimalPlaces: number };
+  companyAvgScore: number;
+  companyAvgTarget: number | null;
+  companyAvgActual: number | null;
+  bestPlants: EntityRef[];
+  worstPlants: EntityRef[];
+  shiftComparison: { id: string; name: string; score: number }[];
+  bestForemen: EntityRef[];
+  worstForemen: EntityRef[];
+  foremanValues: KpiForemanValueItem[];
   trend: { date: string; score: number }[];
 }
 
@@ -452,25 +622,25 @@ export type ReportFormat = "csv" | "xlsx" | "pdf";
 
 export interface ReportExportMeta {
   id: string;
-  file_name: string;
-  report_type: string;
+  fileName: string;
+  reportType: string;
   format: string;
-  row_count: number;
-  status?: string;
-  requested_by?: string | null;
-  created_at: string;
+  rowCount: number;
+  status?: string | null;
+  requestedBy?: string | null;
+  createdAt: string;
 }
 
 export type ContributionWorkType =
   | "smed" | "kaizen" | "problem_solving" | "cost_reduction" | "time_saving"
   | "quality_improvement" | "safety_improvement" | "energy_resource_saving"
-  | "production_efficiency" | "digitalization" | "other";
+  | "production_efficiency" | "digitalization"
+  | "5s" | "variety_changeover_efficiency" | "staff_saving" | "customer_complaint" | "poka_yoke"
+  | "other";
 export type ContributionStatus = "draft" | "published";
 export type FinancialGainStatus = "yes" | "no" | "not_calculated";
 export type ContributionCurrency = "TRY" | "USD" | "EUR";
 export type GainPeriod = "one_time" | "monthly" | "yearly";
-export type VerifyingDepartment =
-  | "finance" | "production" | "maintenance" | "quality" | "safety" | "energy" | "hr" | "other";
 export type ContributionTimeUnit = "second" | "minute" | "hour";
 export type RepeatPeriod = "daily" | "weekly" | "monthly";
 export type ImpactLevel = "low" | "medium" | "high";
@@ -485,7 +655,7 @@ export type ContributionRole = "lead" | "contributor";
 export interface ContributionForemanRef {
   id: string;
   name: string;
-  employee_number: string;
+  employeeNumber: string;
   role: ContributionRole;
 }
 
@@ -493,33 +663,33 @@ export interface ContributionPlantRef {
   id: string;
   name: string;
   code: string;
-  factory_id: string;
-  factory_name: string;
-  factory_code: string;
+  factoryId: string;
+  factoryName: string;
+  factoryCode: string;
 }
 
 export interface ContributionGain {
   id: string;
-  gain_type: OtherGainType;
-  gain_type_label: string;
-  gain_type_other_note: string | null;
-  previous_value: number | null;
-  next_value: number | null;
-  change_amount: number | null;
-  change_percent: number | null;
-  is_improvement: boolean | null;
+  gainType: OtherGainType;
+  gainTypeLabel: string;
+  gainTypeOtherNote: string | null;
+  previousValue: number | null;
+  nextValue: number | null;
+  changeAmount: number | null;
+  changePercent: number | null;
+  isImprovement: boolean | null;
   unit: string | null;
-  measurement_period: string | null;
+  measurementPeriod: string | null;
   description: string | null;
 }
 
 export interface ContributionGainInput {
-  gain_type: OtherGainType;
-  gain_type_other_note?: string;
-  previous_value?: number;
-  next_value?: number;
+  gainType: OtherGainType;
+  gainTypeOtherNote?: string;
+  previousValue?: number;
+  nextValue?: number;
   unit?: string;
-  measurement_period?: string;
+  measurementPeriod?: string;
   description?: string;
 }
 
@@ -528,134 +698,127 @@ export interface ContributionHighlightedGain {
   label: string;
   value: number;
   unit: string | null;
-  is_verified: boolean;
 }
 
 export interface ContributionBeforeAfter {
-  metric_label: string;
+  metricLabel: string;
   before: string;
   after: string;
   change: string;
-  is_improvement: boolean;
+  isImprovement: boolean;
 }
 
 export interface ContributionWorkItem {
   id: string;
   title: string;
   status: ContributionStatus;
-  work_type: ContributionWorkType | null;
-  work_type_label: string | null;
-  work_type_other_note: string | null;
+  workType: ContributionWorkType | null;
+  workTypeLabel: string | null;
+  workTypeOtherNote: string | null;
   summary: string | null;
-  detailed_description: string | null;
-  problem_description: string | null;
-  solution_description: string | null;
-  result_description: string | null;
+  detailedDescription: string | null;
+  problemDescription: string | null;
+  solutionDescription: string | null;
+  resultDescription: string | null;
   foremen: ContributionForemanRef[];
-  plant: ContributionPlantRef | null;
-  work_date: string | null;
-  work_date_end: string | null;
-  impact_level: ImpactLevel | null;
-  created_by: string | null;
-  created_by_user_id: string;
-  published_at: string | null;
-  is_standardized: boolean;
-  is_applicable_other_plants: boolean;
-  is_permanent_solution: boolean;
-  work_instruction_updated: boolean;
-  financial_gain_status: FinancialGainStatus;
-  estimated_amount: number | null;
-  verified_amount: number | null;
+  plants: ContributionPlantRef[];
+  workDate: string | null;
+  workDateEnd: string | null;
+  impactLevel: ImpactLevel | null;
+  createdBy: string | null;
+  publishedAt: string | null;
+  isStandardized: boolean;
+  isApplicableOtherPlants: boolean;
+  isPermanentSolution: boolean;
+  workInstructionUpdated: boolean;
+  financialGainStatus: FinancialGainStatus;
+  gainAmount: number | null;
   currency: ContributionCurrency | null;
-  gain_period: GainPeriod | null;
-  calculation_method: string | null;
-  is_gain_verified: boolean;
-  verified_by_department: VerifyingDepartment | null;
-  verified_by_department_other_note: string | null;
-  verification_date: string | null;
-  verification_note: string | null;
-  previous_duration: number | null;
-  new_duration: number | null;
-  duration_unit: ContributionTimeUnit | null;
-  per_occurrence_saving: number | null;
-  repeat_period: RepeatPeriod | null;
-  repeat_count: number | null;
-  monthly_total_saving_minutes: number | null;
+  gainPeriod: GainPeriod | null;
+  calculationMethod: string | null;
+  previousDuration: number | null;
+  newDuration: number | null;
+  durationUnit: ContributionTimeUnit | null;
+  perOccurrenceSaving: number | null;
+  repeatPeriod: RepeatPeriod | null;
+  repeatCount: number | null;
+  monthlyTotalSavingMinutes: number | null;
   gains: ContributionGain[];
-  highlighted_gain_mode: HighlightedGainMode;
-  highlighted_gain_ref: string | null;
-  highlighted_gain: ContributionHighlightedGain | null;
-  before_after: ContributionBeforeAfter | null;
+  highlightedGainMode: HighlightedGainMode;
+  highlightedGainRef: string | null;
+  highlightedGain: ContributionHighlightedGain | null;
+  beforeAfter: ContributionBeforeAfter | null;
   badges: string[];
-  created_at: string;
-  updated_at: string;
+  contributionScore: number | null;
+  contributionScoreLabel: string | null;
+  contributionScoreBreakdown: ContributionScoreCriterion[];
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface ContributionScoreCriterion {
+  label: string;
+  points: number;
+  detail: string;
 }
 
 export interface ContributionWorkCreatePayload {
   title: string;
   status?: ContributionStatus;
-  work_type?: ContributionWorkType;
-  work_type_other_note?: string;
+  workType?: ContributionWorkType;
+  workTypeOtherNote?: string;
   summary?: string;
-  detailed_description?: string;
-  problem_description?: string;
-  solution_description?: string;
-  result_description?: string;
-  foreman_ids?: string[];
-  plant_id?: string;
-  work_date?: string;
-  work_date_end?: string;
-  impact_level?: ImpactLevel;
-  is_standardized?: boolean;
-  is_applicable_other_plants?: boolean;
-  is_permanent_solution?: boolean;
-  work_instruction_updated?: boolean;
-  financial_gain_status?: FinancialGainStatus;
-  estimated_amount?: number;
-  verified_amount?: number;
+  detailedDescription?: string;
+  problemDescription?: string;
+  solutionDescription?: string;
+  resultDescription?: string;
+  foremanIds?: string[];
+  plantIds?: string[];
+  workDate?: string;
+  workDateEnd?: string;
+  impactLevel?: ImpactLevel;
+  isStandardized?: boolean;
+  isApplicableOtherPlants?: boolean;
+  isPermanentSolution?: boolean;
+  workInstructionUpdated?: boolean;
+  financialGainStatus?: FinancialGainStatus;
+  gainAmount?: number;
   currency?: ContributionCurrency;
-  gain_period?: GainPeriod;
-  calculation_method?: string;
-  is_gain_verified?: boolean;
-  verified_by_department?: VerifyingDepartment;
-  verified_by_department_other_note?: string;
-  verification_date?: string;
-  verification_note?: string;
-  previous_duration?: number;
-  new_duration?: number;
-  duration_unit?: ContributionTimeUnit;
-  repeat_period?: RepeatPeriod;
-  repeat_count?: number;
-  per_occurrence_saving?: number;
-  monthly_total_saving_minutes?: number;
+  gainPeriod?: GainPeriod;
+  calculationMethod?: string;
+  previousDuration?: number;
+  newDuration?: number;
+  durationUnit?: ContributionTimeUnit;
+  repeatPeriod?: RepeatPeriod;
+  repeatCount?: number;
+  perOccurrenceSaving?: number;
+  monthlyTotalSavingMinutes?: number;
   gains?: ContributionGainInput[];
-  highlighted_gain_mode?: HighlightedGainMode;
-  highlighted_gain_ref?: string;
+  highlightedGainMode?: HighlightedGainMode;
+  highlightedGainRef?: string;
 }
 
 export type ContributionWorkUpdatePayload = Partial<ContributionWorkCreatePayload>;
 
 export interface ForemanContributionSummary {
-  total_contributions: number;
-  smed_count: number;
-  led_contributions: number;
-  verified_financial_gain: Record<string, number>;
-  estimated_financial_gain: Record<string, number>;
-  total_time_saving_minutes: number;
-  last_contribution_date: string | null;
+  totalContributions: number;
+  smedCount: number;
+  ledContributions: number;
+  financialGain: Record<string, number>;
+  totalTimeSavingMinutes: number;
+  lastContributionDate: string | null;
 }
 
 export interface ContributionSummary {
-  total_works: number;
-  added_this_month: number;
-  total_estimated_gain: number;
-  total_verified_gain: number;
-  total_monthly_time_saving_minutes: number;
-  by_plant: { name: string; count: number }[];
-  by_work_type: { label: string; count: number }[];
-  top_foremen: { id: string; name: string; count: number }[];
-  applicable_other_plants_count: number;
-  standardized_ratio: number;
+  totalWorks: number;
+  addedThisMonth: number;
+  totalGainAmount: number;
+  totalMonthlyTimeSavingMinutes: number;
+  byPlant: { name: string; count: number }[];
+  byWorkType: { label: string; count: number }[];
+  topForemen: { id: string; name: string; count: number }[];
+  applicableOtherPlantsCount: number;
+  standardizedRatio: number;
 }
 
 
@@ -670,28 +833,28 @@ export interface AnomalyListItem {
   id: string;
   code: string;
   title: string;
-  factory_code: string | null;
-  factory_name: string | null;
-  plant_id: string;
-  plant_name: string | null;
-  shift_id: string | null;
-  shift_name: string | null;
-  kpi_id: string;
-  kpi_code: string | null;
-  kpi_name: string | null;
-  anomaly_type: string;
-  anomaly_type_label: string;
-  detected_at: string;
-  period_start: string;
-  period_end: string;
-  deviation_percent: number;
-  ml_confidence: number;
+  factoryCode: string | null;
+  factoryName: string | null;
+  plantId: string;
+  plantName: string | null;
+  shiftId: string | null;
+  shiftName: string | null;
+  kpiId: string;
+  kpiCode: string | null;
+  kpiName: string | null;
+  anomalyType: string;
+  anomalyTypeLabel: string;
+  detectedAt: string;
+  periodStart: string;
+  periodEnd: string;
+  deviationPercent: number;
+  mlConfidence: number;
   severity: AnomalySeverity;
-  severity_label: string;
+  severityLabel: string;
   status: AnomalyStatus;
-  status_label: string;
-  analysis_status: AnomalyAnalysisStatus;
-  analysis_status_label: string;
+  statusLabel: string;
+  analysisStatus: AnomalyAnalysisStatus;
+  analysisStatusLabel: string;
 }
 
 export interface AnomalyEvidenceItem {
@@ -703,9 +866,9 @@ export interface AnomalyEvidenceItem {
 
 export interface AnomalyRelatedSignal {
   kpi: string;
-  kpi_code: string;
+  kpiCode: string;
   value: number;
-  change_percent: number;
+  changePercent: number;
   direction: "increase" | "decrease";
 }
 
@@ -719,9 +882,9 @@ export type KpiDirection = "high" | "low" | null;
 export interface AnomalyKpiDefinition {
   name: string | null;
   description: string | null;
-  desired_direction: KpiDirection;
-  warning_threshold: number | null;
-  critical_threshold: number | null;
+  desiredDirection: KpiDirection;
+  warningThreshold: number | null;
+  criticalThreshold: number | null;
 }
 
 export type AnalysisConfidence = "low" | "medium" | "high";
@@ -729,75 +892,75 @@ export type AnalysisPriority = "low" | "medium" | "high" | "critical";
 export type AnalysisRiskLevel = "low" | "medium" | "high" | "critical";
 
 export interface AnalysisSourceRef {
-  tool_call_id: string;
-  tool_name: string;
+  toolCallId: string;
+  toolName: string;
 }
 
 export interface AnalysisVerifiedFinding {
-  finding_id?: string;
+  findingId?: string;
   finding: string;
   evidence: string;
-  source_refs: AnalysisSourceRef[];
+  sourceRefs: AnalysisSourceRef[];
 }
 
 export interface AnalysisPossibleCause {
   cause: string;
   confidence: AnalysisConfidence;
-  supporting_evidence: string[];
-  contradicting_evidence: string[];
-  source_refs: AnalysisSourceRef[];
-  verification_required: string;
+  supportingEvidence: string[];
+  contradictingEvidence: string[];
+  sourceRefs: AnalysisSourceRef[];
+  verificationRequired: string;
 }
 
 export interface AnalysisRecommendedInvestigation {
   step: string;
-  responsible_unit: string;
+  responsibleUnit: string;
   priority: AnalysisPriority;
-  expected_output: string;
+  expectedOutput: string;
 }
 
 export interface AnalysisImmediateAction {
   action: string;
-  responsible_unit: string;
+  responsibleUnit: string;
   priority: AnalysisPriority;
   timeframe: string;
-  expected_impact: string;
-  requires_approval: boolean;
+  expectedImpact: string;
+  requiresApproval: boolean;
 }
 
 export interface AnalysisMediumTermAction {
   action: string;
-  responsible_unit: string;
-  expected_impact: string;
+  responsibleUnit: string;
+  expectedImpact: string;
 }
 
 export interface AnalysisToolUsedRef {
-  tool_name: string;
-  tool_call_id: string;
+  toolName: string;
+  toolCallId: string;
   purpose: string;
 }
 
 export interface AnalysisDataScope {
-  start_date: string;
-  end_date: string;
-  record_count: number;
-  data_quality_status: string;
+  startDate: string;
+  endDate: string;
+  recordCount: number;
+  dataQualityStatus: string;
 }
 
 export interface AnalysisResult {
-  executive_summary: string;
-  verified_findings: AnalysisVerifiedFinding[];
-  possible_causes: AnalysisPossibleCause[];
-  recommended_investigations: AnalysisRecommendedInvestigation[];
-  immediate_actions: AnalysisImmediateAction[];
-  medium_term_actions: AnalysisMediumTermAction[];
-  missing_information: string[];
-  risk_level: AnalysisRiskLevel;
-  analysis_confidence: number;
-  requires_human_review: boolean;
-  tools_used: AnalysisToolUsedRef[];
-  data_scope: AnalysisDataScope | null;
-  analysis_limitations: string[];
+  executiveSummary: string;
+  verifiedFindings: AnalysisVerifiedFinding[];
+  possibleCauses: AnalysisPossibleCause[];
+  recommendedInvestigations: AnalysisRecommendedInvestigation[];
+  immediateActions: AnalysisImmediateAction[];
+  mediumTermActions: AnalysisMediumTermAction[];
+  missingInformation: string[];
+  riskLevel: AnalysisRiskLevel;
+  analysisConfidence: number;
+  requiresHumanReview: boolean;
+  toolsUsed: AnalysisToolUsedRef[];
+  dataScope: AnalysisDataScope | null;
+  analysisLimitations: string[];
   disclaimer: string;
 }
 
@@ -806,210 +969,240 @@ export interface AnomalyAnalysisRecord {
   code: string;
   mode: AnalysisMode;
   status: AnomalyAnalysisStatus;
-  status_label: string;
-  is_demo: boolean;
+  statusLabel: string;
+  isDemo: boolean;
   model: string;
   result: AnalysisResult | null;
-  investigation_plan: string[] | null;
-  tool_call_count: number;
-  error_code: string | null;
-  error_message: string | null;
-  started_at: string;
-  completed_at: string | null;
+  investigationPlan: string[] | null;
+  toolCallCount: number;
+  errorCode: string | null;
+  errorMessage: string | null;
+  startedAt: string;
+  completedAt: string | null;
 }
 
 export interface AnomalyToolCallItem {
   id: string;
   code: string;
-  step_number: number;
-  tool_name: string;
-  tool_label: string;
+  stepNumber: number;
+  toolName: string;
+  toolLabel: string;
   arguments: Record<string, unknown>;
   status: "success" | "error" | "timeout";
   result: Record<string, unknown> | null;
-  record_count: number | null;
-  error_code: string | null;
-  error_message: string | null;
-  started_at: string;
-  completed_at: string | null;
-  duration_ms: number | null;
+  recordCount: number | null;
+  errorCode: string | null;
+  errorMessage: string | null;
+  startedAt: string;
+  completedAt: string | null;
+  durationMs: number | null;
 }
 
 export interface AnomalyDetail extends AnomalyListItem {
   description: string;
-  observed_value: number;
-  expected_value: number;
+  observedValue: number;
+  expectedValue: number;
+  targetValue: number | null;
   unit: string;
-  affected_days: number | null;
-  total_days: number | null;
+  affectedDays: number | null;
+  totalDays: number | null;
   comparison: Record<string, number>;
-  related_signals: AnomalyRelatedSignal[];
+  relatedSignals: AnomalyRelatedSignal[];
   evidence: AnomalyEvidenceItem[];
-  foreman_codes: string[];
-  data_quality_status: string;
-  data_quality_warnings: string[];
-  daily_history: AnomalyDailyPoint[];
-  kpi_definition: AnomalyKpiDefinition;
-  latest_analysis: AnomalyAnalysisRecord | null;
-  analysis_history: AnomalyAnalysisRecord[];
+  foremanCodes: string[];
+  dataQualityStatus: string;
+  dataQualityWarnings: string[];
+  dailyHistory: AnomalyDailyPoint[];
+  kpiDefinition: AnomalyKpiDefinition;
+  latestAnalysis: AnomalyAnalysisRecord | null;
+  analysisHistory: AnomalyAnalysisRecord[];
 }
 
 export interface AnomalySummary {
-  total_active: number;
-  critical_count: number;
-  high_count: number;
-  pending_analysis_count: number;
-  opened_last_7_days: number;
-  resolved_count: number;
+  totalActive: number;
+  criticalCount: number;
+  highCount: number;
+  pendingAnalysisCount: number;
+  openedLast7Days: number;
+  resolvedCount: number;
 }
 
 export interface ForemanRef {
   id: string;
   name: string;
-  employee_number: string;
+  employeeNumber: string;
 }
 
 export interface ForemanKpiTrendPoint {
-  period_label: string;
-  avg_actual: number | null;
-  has_data: boolean;
+  periodLabel: string;
+  avgActual: number | null;
+  hasData: boolean;
 }
 
 export interface ResponsibleForeman {
   resolved: boolean;
-  shift_specific: boolean;
+  shiftSpecific: boolean;
   reason: string | null;
   note: string | null;
-  primary: (ForemanRef & { day_count: number; total_days?: number }) | null;
-  others: (ForemanRef & { day_count: number })[];
-  kpi_trend: ForemanKpiTrendPoint[];
+  primary: (ForemanRef & { dayCount?: number | null; totalDays?: number | null }) | null;
+  others: (ForemanRef & { dayCount?: number | null })[];
+  kpiTrend: ForemanKpiTrendPoint[];
 }
 
 export interface BaselineComparison {
   available: boolean;
   reason?: string;
-  baseline_period?: { start: string; end: string; days: number };
-  current_period?: { start: string; end: string; days: number };
-  baseline_avg?: number;
-  current_avg?: number;
-  abs_change?: number;
-  pct_change?: number | null;
+  baselinePeriod?: { start: string; end: string; days: number };
+  currentPeriod?: { start: string; end: string; days: number };
+  baselineAvg?: number;
+  currentAvg?: number;
+  absChange?: number;
+  pctChange?: number | null;
   direction?: "improved" | "worsened" | "unchanged";
 }
 
 export interface RelatedKpiChange {
   kpi: string;
-  kpi_code: string;
-  baseline_value: number;
-  current_value: number;
-  abs_change: number;
-  change_percent: number;
+  kpiCode: string;
+  baselineValue: number;
+  currentValue: number;
+  absChange: number;
+  changePercent: number;
   direction: "increase" | "decrease";
-  performance_direction: "improved" | "worsened" | null;
+  performanceDirection: "improved" | "worsened" | null;
   sparkline: number[];
 }
 
 export interface DowntimeCategory {
   category: string;
-  total_minutes: number;
-  occurrence_count: number;
+  totalMinutes: number;
+  occurrenceCount: number;
 }
 
 export interface DowntimeBreakdown {
-  plant_name: string;
-  shift_name: string;
-  period_days: number;
-  total_downtime_minutes: number;
-  total_downtime_count: number;
+  plantName: string;
+  shiftName: string;
+  periodDays: number;
+  totalDowntimeMinutes: number;
+  totalDowntimeCount: number;
   categories: DowntimeCategory[];
-  top_reasons: string[];
-  longest_single_event_minutes: number;
-  previous_period_total_minutes: number;
-  other_shifts_average_minutes: number | null;
+  topReasons: string[];
+  longestSingleEventMinutes: number;
+  previousPeriodTotalMinutes: number;
+  otherShiftsAverageMinutes: number | null;
 }
 
 export interface InvestigationImpact {
-  additional_downtime_minutes: number | null;
-  additional_downtime_note: string | null;
-  production_loss_note: string;
-  cost_note: string;
+  additionalDowntimeMinutes: number | null;
+  additionalDowntimeNote: string | null;
+  productionLossNote: string;
+  costNote: string;
 }
 
 export interface SimilarCase {
-  anomaly_id: string;
-  anomaly_code: string;
+  anomalyId: string;
+  anomalyCode: string;
   title: string;
-  plant_name: string | null;
-  kpi_name: string | null;
-  anomaly_type_label: string;
-  similarity_reason: string;
-  detected_at: string;
-  resolution_status: "resolved" | "open";
-  verified_root_cause: string | null;
-  action_taken: string | null;
-  action_result: string | null;
-  kpi_value_before: number;
-  kpi_value_after: number | null;
+  plantName: string | null;
+  kpiName: string | null;
+  anomalyTypeLabel: string;
+  similarityReason: string;
+  detectedAt: string;
+  resolutionStatus: "resolved" | "open";
+  verifiedRootCause: string | null;
+  actionTaken: string | null;
+  actionResult: string | null;
+  kpiValueBefore: number;
+  kpiValueAfter: number | null;
+}
+
+export interface ShiftComparisonEntry {
+  shiftId: string;
+  code: string;
+  name: string;
+  value: number | null;
+  isAnomalyShift: boolean;
+}
+
+export interface FactoryComparisonEntry {
+  code: string;
+  name: string;
+  value: number | null;
+  isAnomalyFactory: boolean;
+}
+
+export interface PreviousMonthComparison {
+  available: boolean;
+  label?: string;
+  period?: { start: string; end: string };
+  value?: number | null;
+  currentValue?: number;
+  changePercent?: number | null;
 }
 
 export interface AnomalyInvestigation {
-  responsible_foreman: ResponsibleForeman;
-  baseline_comparison: BaselineComparison;
-  related_kpi_changes: RelatedKpiChange[];
-  downtime_breakdown: DowntimeBreakdown | null;
+  responsibleForeman: ResponsibleForeman;
+  baselineComparison: BaselineComparison;
+  relatedKpiChanges: RelatedKpiChange[];
+  downtimeBreakdown: DowntimeBreakdown | null;
   impact: InvestigationImpact;
-  similar_cases: SimilarCase[];
+  similarCases: SimilarCase[];
+  shiftComparison: ShiftComparisonEntry[];
+  factoryComparison: FactoryComparisonEntry[];
+  previousMonth: PreviousMonthComparison;
+  comparisonTargetValue: number | null;
 }
 
 
 export type ShiftAnomalySeverity = "medium" | "high";
 
 export interface ShiftAnalysisPeriod {
-  month_start: string;
-  month_end: string;
+  monthStart: string;
+  monthEnd: string;
   label: string;
 }
 
 export interface ShiftAnalysisSummary {
   period: ShiftAnalysisPeriod;
-  total_anomalies: number;
-  high_count: number;
-  medium_count: number;
-  top_plant: { id: string; name: string; count: number } | null;
-  top_kpi: { id: string; name: string; count: number } | null;
-  max_pct_diff: number | null;
+  totalAnomalies: number;
+  highCount: number;
+  mediumCount: number;
+  topPlant: { id: string; name: string; count: number } | null;
+  topKpi: { id: string; name: string; count: number } | null;
+  maxPctDiff: number | null;
 }
 
 export interface ShiftAnomalyForemanStat {
   id: string;
   name: string;
-  employee_number: string;
-  avg_actual: number;
-  record_count: number;
-  week_count: number;
+  employeeNumber: string;
+  avgActual: number;
+  recordCount: number;
+  weekCount: number;
 }
 
 export interface ShiftAnomalyCard {
   id: string;
-  plant_id: string;
-  plant_name: string;
-  plant_sequence: number;
-  factory_id: string;
-  factory_code: string;
-  shift_id: string;
-  shift_name: string;
-  kpi_id: string;
-  kpi_code: string;
-  kpi_name: string;
-  kpi_unit: string;
-  success_direction_higher: boolean;
+  plantId: string;
+  plantName: string;
+  plantSequence: number;
+  factoryId: string;
+  factoryCode: string;
+  shiftId: string;
+  shiftName: string;
+  kpiId: string;
+  kpiCode: string;
+  kpiName: string;
+  kpiUnit: string;
+  kpiDecimalPlaces: number;
+  successDirectionHigher: boolean;
   severity: ShiftAnomalySeverity;
   title: string;
   better: ShiftAnomalyForemanStat;
   worse: ShiftAnomalyForemanStat;
-  abs_diff: number;
-  pct_diff: number;
-  compared_weeks: number;
+  absDiff: number;
+  pctDiff: number;
+  comparedWeeks: number;
   period: ShiftAnalysisPeriod;
 }
 
@@ -1018,54 +1211,64 @@ export interface ShiftAnalysisCardsResponse {
   summary: ShiftAnalysisSummary;
 }
 
-export interface ShiftAnomalyWeeklyPoint {
-  week_index: number;
-  week_label: string;
-  foreman_id: string;
-  avg_actual: number;
-  day_count: number;
+export interface ShiftWeeklyForemanPoint {
+  assigned: boolean;
+  value: number | null;
+  dayCount: number;
+  hasSufficientData: boolean;
+  shiftId: string | null;
+  shiftName: string | null;
+}
+
+export interface ShiftWeeklyComparisonPoint {
+  weekIndex: number;
+  weekLabel: string;
+  better: ShiftWeeklyForemanPoint;
+  worse: ShiftWeeklyForemanPoint;
 }
 
 export interface ShiftAnomalyCrossKpiSignal {
-  kpi_id: string;
-  kpi_code: string;
-  kpi_name: string;
-  pct_diff: number;
+  kpiId: string;
+  kpiCode: string;
+  kpiName: string;
+  pctDiff: number;
   severity: ShiftAnomalySeverity;
-  same_foreman_better: boolean;
+  sameForemanBetter: boolean;
 }
 
 export interface ShiftAnomalyDetail extends ShiftAnomalyCard {
-  weekly_breakdown: ShiftAnomalyWeeklyPoint[];
-  cross_kpi_signals: ShiftAnomalyCrossKpiSignal[];
-  pattern_commentary: string;
-  is_recurring_pattern: boolean;
+  referenceTarget: number;
+  weeklyComparison: ShiftWeeklyComparisonPoint[];
+  crossKpiSignals: ShiftAnomalyCrossKpiSignal[];
+  patternHeadline: string;
+  patternDetail: string;
+  isRecurringPattern: boolean;
 }
 
 
 export type HeatmapLevel = "no_data" | "normal" | "attention" | "significant" | "critical";
 
 export interface HeatmapShiftPoint {
-  avg_actual: number;
-  record_count: number;
+  avgActual: number;
+  recordCount: number;
 }
 
 export interface HeatmapCell {
-  plant_id: string;
-  kpi_id: string;
+  plantId: string;
+  kpiId: string;
   level: HeatmapLevel;
   v1: HeatmapShiftPoint | null;
   v2: HeatmapShiftPoint | null;
-  abs_diff: number | null;
-  pct_diff: number | null;
-  better_shift_id: string | null;
+  absDiff: number | null;
+  pctDiff: number | null;
+  betterShiftId: string | null;
 }
 
 export interface HeatmapPlantRef {
   id: string;
   name: string;
-  sequence_number: number;
-  factory_code: string;
+  sequenceNumber: number;
+  factoryCode: string;
 }
 
 export interface HeatmapKpiRef {
@@ -1076,10 +1279,10 @@ export interface HeatmapKpiRef {
 }
 
 export interface ShiftHeatmapSummary {
-  anomaly_plant_count: number;
-  critical_cell_count: number;
-  priority_plant_count: number;
-  top_kpi: { id: string; name: string; count: number } | null;
+  anomalyPlantCount: number;
+  criticalCellCount: number;
+  priorityPlantCount: number;
+  topKpi: { id: string; name: string; count: number } | null;
 }
 
 export interface ShiftHeatmapResponse {
@@ -1093,24 +1296,24 @@ export interface ShiftHeatmapResponse {
 
 
 export interface ForemanShiftMatrixCell {
-  avg_actual: number;
-  avg_target: number;
+  avgActual: number;
+  avgTarget: number;
   score: number;
-  record_count: number;
-  deviation_pct: number | null;
+  recordCount: number;
+  deviationPct: number | null;
   level: PerformanceLevel;
 }
 
 export interface ForemanShiftMatrixRow {
-  foreman_id: string;
-  full_name: string;
-  employee_number: string;
+  foremanId: string;
+  fullName: string;
+  employeeNumber: string;
   cells: Record<string, ForemanShiftMatrixCell | null>;
 }
 
 export interface ForemanShiftMatrixResponse {
-  kpi: { id: string; code: string; name: string; unit: string; success_direction_higher: boolean };
-  reference_target: number;
+  kpi: { id: string; code: string; name: string; unit: string; successDirectionHigher: boolean };
+  referenceTarget: number;
   shifts: { id: string; code: string; name: string }[];
   rows: ForemanShiftMatrixRow[];
   insight: string;

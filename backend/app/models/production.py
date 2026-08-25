@@ -2,7 +2,7 @@
 import uuid
 from datetime import date, datetime
 
-from sqlalchemy import Boolean, Date, DateTime, Enum, ForeignKey, ForeignKeyConstraint, Integer, Numeric, String, UniqueConstraint
+from sqlalchemy import Boolean, CheckConstraint, Date, DateTime, Enum, ForeignKey, ForeignKeyConstraint, Integer, Numeric, String, UniqueConstraint
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import Mapped, mapped_column
 
@@ -72,6 +72,10 @@ class ProductionRecord(TimestampMixin, Base):
             "foreman_id", "production_date", "shift_id", "plant_id", name="uq_production_record_natural_key"
         ),
         ForeignKeyConstraint(["plant_id", "chief_id"], ["plants.id", "plants.chief_id"], name="fk_production_records_plant_chief"),
+        CheckConstraint(
+            "working_time_minutes IS NULL OR (working_time_minutes >= 0 AND working_time_minutes <= 720)",
+            name="ck_production_records_working_time_minutes_range",
+        ),
     )
 
     id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
@@ -111,6 +115,8 @@ class ProductionRecord(TimestampMixin, Base):
     technical_downtime_minutes: Mapped[float | None] = mapped_column(Numeric(10, 2))
     manufacturing_downtime_minutes: Mapped[float | None] = mapped_column(Numeric(10, 2))
     other_downtime_minutes: Mapped[float | None] = mapped_column(Numeric(10, 2))
+
+    working_time_minutes: Mapped[float | None] = mapped_column(Numeric(6, 2))
 
     plan_revision_no: Mapped[int] = mapped_column(Integer, nullable=False, default=1)
     plan_revision_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))

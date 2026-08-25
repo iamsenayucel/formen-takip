@@ -1,7 +1,8 @@
 import { Bar, BarChart, CartesianGrid, Cell, ReferenceLine, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
 import type { KeyboardEvent } from "react";
-import { resolveChartInk } from "../../lib/chartColors";
+import { dataSecondaryColor, resolveChartInk } from "../../lib/chartColors";
 import { useTheme } from "../../context/ThemeContext";
+import { useViewportTier } from "../../hooks/useViewportTier";
 import { EmptyState } from "../StateViews";
 
 interface Item {
@@ -15,10 +16,11 @@ export function RankingBarChart({ items, onSelect }: { items: Item[]; onSelect?:
   const { theme } = useTheme();
   const isDark = theme === "dark";
   const ink = resolveChartInk(isDark);
+  const isCompact = useViewportTier() === "compact";
 
   if (items.length === 0) return <EmptyState />;
 
-  const height = Math.max(120, items.length * 32);
+  const height = Math.max(120, items.length * (isCompact ? 27 : 32));
 
   const handleSelect = (entry: { payload?: Item }) => {
     if (onSelect && entry.payload?.id) onSelect(entry.payload);
@@ -28,16 +30,16 @@ export function RankingBarChart({ items, onSelect }: { items: Item[]; onSelect?:
     <ResponsiveContainer width="100%" height={height}>
       <BarChart data={items} layout="vertical" margin={{ top: 4, right: 24, left: 4, bottom: 4 }}>
         <CartesianGrid strokeDasharray="3 3" stroke={ink.grid} horizontal={false} />
-        <XAxis type="number" tick={{ fontSize: 11, fill: ink.muted }} tickLine={false} axisLine={{ stroke: ink.axis }} />
+        <XAxis type="number" tick={{ fontSize: isCompact ? 10 : 11, fill: ink.muted }} tickLine={false} axisLine={{ stroke: ink.axis }} />
         <YAxis
           type="category"
           dataKey="name"
-          width={140}
-          tick={{ fontSize: 12, fill: ink.secondary }}
+          width={isCompact ? 118 : 140}
+          tick={{ fontSize: isCompact ? 11 : 12, fill: ink.secondary }}
           tickLine={false}
           axisLine={false}
         />
-        <ReferenceLine x={100} stroke={ink.muted} strokeDasharray="4 4" />
+        <ReferenceLine x={100} stroke={dataSecondaryColor(isDark)} strokeDasharray="4 4" />
         <Tooltip
           formatter={(value) => [Number(value).toFixed(1), "Puan"]}
           contentStyle={{
@@ -50,7 +52,7 @@ export function RankingBarChart({ items, onSelect }: { items: Item[]; onSelect?:
         <Bar
           dataKey="score"
           radius={[0, 4, 4, 0]}
-          barSize={18}
+          barSize={isCompact ? 15 : 18}
           cursor={onSelect ? "pointer" : undefined}
           tabIndex={onSelect ? 0 : undefined}
           role={onSelect ? "button" : undefined}

@@ -1,29 +1,36 @@
-from uuid import UUID
-
-from fastapi import Depends, HTTPException, status
+from fastapi import Depends
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
-from sqlalchemy.orm import Session
 
-from app.core.security import decode_token
-from app.db.session import get_db
-from app.models.user import User
+from app.core.config import get_settings
+from app.core.errors import UnauthorizedError
+from app.core.oidc import OIDCConfigError, TokenValidationError, verify_access_token
+from app.schemas.auth import Identity
 
 _bearer_scheme = HTTPBearer(auto_error=False)
 
+_DEV_BYPASS_SUBJECT = "dev-demo-user"
 
-def get_current_user(
+
+def get_current_identity(
     credentials: HTTPAuthorizationCredentials | None = Depends(_bearer_scheme),
-    db: Session = Depends(get_db),
-) -> User:
+) -> Identity:
+    settings = get_settings()
+
+    # Yalnızca geliştirme/demo içindir. Settings, ENVIRONMENT=development dışında
+    # auth_bypass=True değerini reddettiğinden production'da OIDC doğrulaması atlanamaz.
+    if settings.auth_bypass and settings.environment == "development":
+        return Identity(subject=_DEV_BYPASS_SUBJECT, claims={"name": "Demo User", "sub": _DEV_BYPASS_SUBJECT})
+
     if credentials is None:
-        raise HTTPException(status.HTTP_401_UNAUTHORIZED, "Kimlik doğrulama gerekli.")
+        raise UnauthorizedError("Kimlik doğrulama gerekli.")
 
-    payload = decode_token(credentials.credentials)
-    if payload is None or payload.get("type") != "access":
-        raise HTTPException(status.HTTP_401_UNAUTHORIZED, "Geçersiz veya süresi dolmuş oturum.")
+    try:
+        claims = verify_access_token(credentials.credentials)
+    except (OIDCConfigError, TokenValidationError):
+        raise UnauthorizedError("Geçersiz veya süresi dolmuş oturum.")
 
-    user = db.get(User, UUID(payload["sub"]))
-    if user is None or not user.is_active:
-        raise HTTPException(status.HTTP_401_UNAUTHORIZED, "Kullanıcı bulunamadı veya pasif.")
+    subject = claims.get(settings.oidc_user_id_claim) or claims.get("sub")
+    if not subject:
+        raise UnauthorizedError("Jeton kimlik bilgisi içermiyor.")
 
-    return user
+    return Identity(subject=str(subject), claims=claims)

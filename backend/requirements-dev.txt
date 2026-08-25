@@ -1,0 +1,8 @@
+-r requirements.txt
+pytest==8.3.3
+pytest-cov==5.0.0
+
+# Integration test DB isolation (tests/integration/_ephemeral_db.py): spins up a
+# disposable Postgres container per test session so integration tests never touch
+# the application's normal DATABASE_URL. Dev/test only — not a production dependency.
+testcontainers[postgres]==4.15.0

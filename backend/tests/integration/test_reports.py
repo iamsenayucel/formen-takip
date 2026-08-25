@@ -1,3 +1,5 @@
+from tests.helpers import legacy_json
+
 class TestReports:
     def test_generate_requires_auth(self, client):
         resp = client.post("/api/v1/reports/generate", json={"report_type": "plant_comparison", "format": "csv"})
@@ -10,7 +12,7 @@ class TestReports:
             headers=auth_headers,
         )
         assert gen.status_code == 201
-        body = gen.json()
+        body = legacy_json(gen)
         assert body["row_count"] >= 1
         report_id = body["id"]
 
@@ -26,7 +28,7 @@ class TestReports:
             headers=auth_headers,
         )
         assert gen.status_code == 201
-        report_id = gen.json()["id"]
+        report_id = legacy_json(gen)["id"]
         download = client.get(f"/api/v1/reports/{report_id}/download", headers=auth_headers)
         assert download.status_code == 200
         assert "spreadsheetml" in download.headers["content-type"]
@@ -38,7 +40,7 @@ class TestReports:
             headers=auth_headers,
         )
         assert gen.status_code == 201
-        report_id = gen.json()["id"]
+        report_id = legacy_json(gen)["id"]
         download = client.get(f"/api/v1/reports/{report_id}/download", headers=auth_headers)
         assert download.status_code == 200
         assert download.headers["content-type"] == "application/pdf"
@@ -55,7 +57,7 @@ class TestReports:
         client.post("/api/v1/reports/generate", json={"report_type": "kpi_analysis", "format": "csv"}, headers=auth_headers)
         resp = client.get("/api/v1/reports", headers=auth_headers)
         assert resp.status_code == 200
-        assert resp.json()["total"] >= 1
+        assert legacy_json(resp)["total"] >= 1
 
     def test_download_unknown_report_404(self, client, auth_headers):
         import uuid
@@ -132,6 +134,6 @@ class TestPdfFiltersSummary:
             headers=auth_headers,
         )
         assert gen.status_code == 201
-        pdf = client.get(f"/api/v1/reports/{gen.json()['id']}/download", headers=auth_headers).content
+        pdf = client.get(f"/api/v1/reports/{legacy_json(gen)['id']}/download", headers=auth_headers).content
         assert pdf.startswith(b"%PDF-")
-        assert gen.json()["row_count"] >= 1
+        assert legacy_json(gen)["row_count"] >= 1

@@ -1,0 +1,13 @@
+# Public erişime yalnız edge proxy açılır. Diğer servisler loopback veya
+# private ağa bind olur. Caddy SITE_DOMAIN için TLS sertifikasını yönetir.
+#
+# SITE_DOMAIN=localhost, testte ACME yerine Caddy'nin internal CA'sını kullanır.
+{$SITE_DOMAIN} {
+	header {
+		Strict-Transport-Security "max-age=31536000"
+		X-Content-Type-Options "nosniff"
+		Referrer-Policy "strict-origin-when-cross-origin"
+		X-Frame-Options "DENY"
+	}
+	reverse_proxy frontend:8080
+}

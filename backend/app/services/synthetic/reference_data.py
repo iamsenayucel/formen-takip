@@ -77,13 +77,19 @@ def _make_phone_number(rng: random.Random, used_phones: set[str]) -> str:
 
 _NO_CEILING_SENTINEL = 999999.99
 
+_NO_PLANT_TARGET_VARIANCE_KPI_CODES = frozenset({"OEE"})
+
+
+def kpis_needing_plant_target_variance(kpis: list[Kpi]) -> list[Kpi]:
+    return [k for k in kpis if k.code not in _NO_PLANT_TARGET_VARIANCE_KPI_CODES]
+
 DEFAULT_KPI_SEED = [
     dict(
         code="AGIR_GITME", name="Ağır Gitme Oranı",
         description="Üretilen ürünlerin kabul edilen gramaj aralığının (alt/üst limit) dışına çıkan işaretli sapmasının, standart üretim gramajına oranı.",
         unit="%", calculation_type=CalculationType.CUSTOM_FORMULA, success_direction_higher=False,
         default_target_value=1.5, min_valid_value=-100, max_valid_value=100,
-        min_score=0, max_score=_NO_CEILING_SENTINEL, weight=20, is_critical=True, display_order=1,
+        min_score=0, max_score=_NO_CEILING_SENTINEL, weight=13, is_critical=True, display_order=1,
         rule_params={"formula_type": "SIGNED_ABSOLUTE_PIECEWISE", "good_coefficient": 9, "bad_coefficient": 12},
     ),
     dict(
@@ -91,7 +97,7 @@ DEFAULT_KPI_SEED = [
         description="Tekrar üretimde kullanılamayan, geri kazanılamayan ve çöp veya hayvan yemi olarak değerlendirilen nihai fire miktarının toplam brüt üretim miktarına oranı.",
         unit="%", calculation_type=CalculationType.CUSTOM_FORMULA, success_direction_higher=False,
         default_target_value=3.0, min_valid_value=0, max_valid_value=100,
-        min_score=0, max_score=_NO_CEILING_SENTINEL, weight=25, is_critical=True, display_order=2,
+        min_score=0, max_score=_NO_CEILING_SENTINEL, weight=20, is_critical=True, display_order=2,
         rule_params={
             "formula_type": "HYBRID_BASE_PIECEWISE_LOG", "minimum_normalization_base": 0.05,
             "good_coefficient": 10, "bad_coefficient": 16,
@@ -102,7 +108,7 @@ DEFAULT_KPI_SEED = [
         description="Şekil veya yapı bozukluğu nedeniyle paketlenemeyen ancak ürün hamurlarına katılarak yeniden üretimde kullanılabilen geri dönüştürülebilir ürün miktarının toplam brüt üretim miktarına oranı.",
         unit="%", calculation_type=CalculationType.CUSTOM_FORMULA, success_direction_higher=False,
         default_target_value=2.0, min_valid_value=0, max_valid_value=100,
-        min_score=0, max_score=_NO_CEILING_SENTINEL, weight=15, is_critical=True, display_order=3,
+        min_score=0, max_score=_NO_CEILING_SENTINEL, weight=12, is_critical=True, display_order=3,
         rule_params={"formula_type": "TARGET_RATIO_PIECEWISE", "good_coefficient": 12, "bad_coefficient": 12},
     ),
     dict(
@@ -110,7 +116,7 @@ DEFAULT_KPI_SEED = [
         description="Teknik ve imalat kaynaklı duruş sürelerinin planlanan üretim süresine oranı (Diğer duruşlar puana dahil edilmez).",
         unit="%", calculation_type=CalculationType.CUSTOM_FORMULA, success_direction_higher=False,
         default_target_value=10.0, min_valid_value=0, max_valid_value=100,
-        min_score=0, max_score=_NO_CEILING_SENTINEL, weight=20, is_critical=True, display_order=4,
+        min_score=0, max_score=_NO_CEILING_SENTINEL, weight=22, is_critical=True, display_order=4,
         rule_params={
             "formula_type": "HYBRID_BASE_PIECEWISE_LOG",
             "included_components": ["TECHNICAL", "MANUFACTURING"], "excluded_components": ["OTHER"],
@@ -122,7 +128,7 @@ DEFAULT_KPI_SEED = [
         description="Gerçekleşen üretimin, güncel (revize) üretim planına göre yönlü sapması (planın üzerinde üretim ödüllendirilir, planın altında üretim daha güçlü cezalandırılır).",
         unit="%", calculation_type=CalculationType.CUSTOM_FORMULA, success_direction_higher=True,
         default_target_value=100.0, min_valid_value=0, max_valid_value=300,
-        min_score=0, max_score=_NO_CEILING_SENTINEL, weight=20, is_critical=True, display_order=5,
+        min_score=0, max_score=_NO_CEILING_SENTINEL, weight=12, is_critical=True, display_order=5,
         rule_params={
             "formula_type": "ASYMMETRIC_PLAN_ACHIEVEMENT",
             "target_score": 100, "positive_linear_limit": 5.0,
@@ -131,14 +137,24 @@ DEFAULT_KPI_SEED = [
             "negative_log_coefficient": 10.0, "minimum_score": 0, "maximum_score": None,
         },
     ),
+    dict(
+        code="OEE", name="OEE",
+        description=(
+            "Bir vardiyanın (720 dk) ya da tesis/dönem toplamının gerçekleşen çalışma süresinin, "
+            "ilgili toplam süreye oranı. Formen düzeyinde kendi vardiyasını, tesis/dönem düzeyinde "
+            "vardiyaların toplamını kapsar."
+        ),
+        unit="%", calculation_type=CalculationType.CUSTOM_FORMULA, success_direction_higher=True,
+        default_target_value=100.0, min_valid_value=0, max_valid_value=100,
+        min_score=0, max_score=105, weight=21, is_critical=True, display_order=6,
+        rule_params={"formula_type": "TARGET_RATIO_LINEAR_BONUS", "ratio_multiplier": 1.05, "max_score": 105},
+    ),
 ]
 
 PERFORMANCE_LEVEL_SEED = [
     dict(name="Kritik", min_score=0, max_score=69.99, description="Acil aksiyon gerektiren kritik performans.", color="#DC2626", icon="alert-triangle", sort_order=1),
-    dict(name="Geliştirilmeli", min_score=70, max_score=79.99, description="Hedefin altında, iyileştirme gerekiyor.", color="#EA580C", icon="trending-down", sort_order=2),
-    dict(name="İyi", min_score=80, max_score=89.99, description="Hedefe yakın, kabul edilebilir performans.", color="#CA8A04", icon="thumbs-up", sort_order=3),
-    dict(name="Çok İyi", min_score=90, max_score=99.99, description="Hedefin büyük ölçüde karşılandığı güçlü performans.", color="#2563EB", icon="star", sort_order=4),
-    dict(name="Mükemmel", min_score=100, max_score=120, description="Hedefi aşan üstün performans.", color="#16A34A", icon="trophy", sort_order=5),
+    dict(name="Geliştirilmeli", min_score=70, max_score=89.99, description="Hedefin altında, iyileştirme gerekiyor.", color="#EA580C", icon="trending-down", sort_order=2),
+    dict(name="Başarılı", min_score=90, max_score=9999.99, description="Hedef seviyesinde veya üzerinde başarılı performans.", color="#16A34A", icon="check-circle", sort_order=3),
 ]
 
 SHIFT_SEED = [
@@ -371,20 +387,61 @@ def seed_reference_data(
                 db.add(assignment)
                 ref.assignments.append(assignment)
 
+    kpis_with_plant_variance = kpis_needing_plant_target_variance(ref.kpis)
     for plant in ref.plants:
-        for kpi in ref.kpis:
+        for kpi in kpis_with_plant_variance:
             base = float(kpi.default_target_value)
             variation = rng.uniform(-0.15, 0.15)
+            target_value = max(0.01, min(float(kpi.max_valid_value), base * (1 + variation)))
             plant_target = KpiTarget(
                 kpi_id=kpi.id, scope_type=TargetScopeType.PLANT, scope_id=plant.id,
-                target_value=max(0.01, base * (1 + variation)),
+                target_value=target_value,
                 valid_from=date(2020, 1, 1), is_active=True,
             )
             db.add(plant_target)
             ref.targets.append(plant_target)
     db.flush()
 
+    plant_target_count = sum(1 for t in ref.targets if t.scope_type == TargetScopeType.PLANT)
+    expected_plant_target_count = len(ref.plants) * len(kpis_with_plant_variance)
+    if plant_target_count != expected_plant_target_count:
+        raise ValueError(
+            f"Tesis bazlı KPI hedef kapsamı eksik: {plant_target_count}/{expected_plant_target_count} "
+            "(her aktif tesis, plant-varyasyonu üretilen her KPI için ayrı bir hedefe sahip olmalı)."
+        )
+
     db.commit()
+    return ref
+
+
+def validate_plant_kpi_target_coverage(db: Session) -> tuple[bool, list[str]]:
+    active_plant_ids = {p.id for p in db.scalars(select(Plant).where(Plant.is_active.is_(True)))}
+    active_kpis = [
+        k for k in db.scalars(select(Kpi).where(Kpi.is_active.is_(True)))
+        if k.code not in _NO_PLANT_TARGET_VARIANCE_KPI_CODES
+    ]
+    covered: dict[uuid.UUID, set[uuid.UUID]] = {}
+    for target in db.scalars(
+        select(KpiTarget).where(KpiTarget.scope_type == TargetScopeType.PLANT, KpiTarget.is_active.is_(True))
+    ):
+        covered.setdefault(target.scope_id, set()).add(target.kpi_id)
+
+    missing: list[str] = []
+    for plant in db.scalars(select(Plant).where(Plant.id.in_(active_plant_ids)).order_by(Plant.sequence_number)):
+        plant_covered = covered.get(plant.id, set())
+        for kpi in active_kpis:
+            if kpi.id not in plant_covered:
+                missing.append(f"{plant.code} / {kpi.code}")
+
+    return (len(missing) == 0), missing
+
+
+def load_existing_reference_data(db: Session) -> ReferenceData:
+    ref = ReferenceData()
+    ref.plants = list(db.scalars(select(Plant).order_by(Plant.sequence_number)))
+    ref.foremen = list(db.scalars(select(Foreman)))
+    ref.shifts = list(db.scalars(select(Shift).order_by(Shift.sequence)))
+    ref.assignments = list(db.scalars(select(ForemanAssignment)))
     return ref
 
 

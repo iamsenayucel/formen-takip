@@ -1,29 +1,17 @@
 import { ArrowRight, Trophy, TrendingDown, TrendingUp } from "lucide-react";
 import type { ForemanRankingItem, ForemanTrendRankingItem } from "../api/types";
 import type { FilterState } from "../hooks/useFilters";
+import { periodLabel, scopeLabel } from "../lib/filterLabels";
 import { LoadingState, EmptyState } from "./StateViews";
 
 const RANK_TINTS = [
-  { background: "rgba(202,138,4,0.16)", color: "#ca8a04", border: "rgba(202,138,4,0.4)" },
-  { background: "rgba(100,116,139,0.16)", color: "#64748b", border: "rgba(100,116,139,0.4)" },
-  { background: "rgba(180,83,9,0.16)", color: "#b45309", border: "rgba(180,83,9,0.4)" },
+  { background: "var(--status-neutral-bg)", color: "var(--status-neutral)", border: "var(--status-neutral-border)" },
+  { background: "var(--status-unknown-bg)", color: "var(--status-unknown)", border: "var(--status-unknown-border)" },
+  { background: "var(--status-neutral-bg)", color: "var(--status-neutral)", border: "var(--status-neutral-border)" },
 ];
 
-function periodLabel(filters: FilterState): string {
-  const from = new Date(filters.dateFrom);
-  const to = new Date(filters.dateTo);
-  const sameMonth = from.getFullYear() === to.getFullYear() && from.getMonth() === to.getMonth();
-  if (sameMonth) return to.toLocaleDateString("tr-TR", { month: "long", year: "numeric" });
-  const fmt = (d: Date) => d.toLocaleDateString("tr-TR", { day: "numeric", month: "short" });
-  return `${fmt(from)} – ${fmt(to)} ${to.getFullYear()}`;
-}
-
-function scopeLabel(filters: FilterState): string {
-  if (filters.plantIds.length === 1) return "1 Tesis";
-  if (filters.plantIds.length > 1) return `${filters.plantIds.length} Tesis`;
-  if (filters.factoryIds.length === 1) return "1 Fabrika";
-  if (filters.factoryIds.length > 1) return `${filters.factoryIds.length} Fabrika`;
-  return "Tüm Tesisler";
+function scoreOf(item: ForemanRankingItem | ForemanTrendRankingItem): number {
+  return "generalPerformanceScore" in item ? item.generalPerformanceScore : item.operationalScore;
 }
 
 export function ForemanScoreRow({
@@ -47,12 +35,15 @@ export function ForemanScoreRow({
 }) {
   const barPct = Math.max(4, Math.min(100, score));
   const tint = showRankTint ? RANK_TINTS[rank - 1] : null;
-  const deltaColor = delta !== undefined ? (delta >= 0 ? "#16a34a" : "#dc2626") : null;
+  // Literal hex burada zorunlu: aşağıda `${deltaColor}1a` gibi hex-alfa
+  // birleştirmesiyle kullanılıyor, CSS custom property bu şekilde geçerli olmaz.
+  // Değerler merkezi status paletiyle (--status-positive / --status-negative) eşleşir.
+  const deltaColor = delta !== undefined ? (delta >= 0 ? "#15803d" : "#e90128") : null;
 
   return (
     <button
       onClick={() => onNavigate(id)}
-      className="group flex w-full items-center gap-2.5 rounded-md px-2 py-1.5 text-left transition-all duration-150 hover:-translate-y-0.5 hover:bg-[var(--page-bg)] hover:shadow-sm"
+      className="group flex w-full items-center gap-2.5 rounded-md px-2 py-1.5 text-left transition-all duration-150 hover:-translate-y-0.5 hover:bg-[var(--page-bg)] hover:shadow-sm max-[1439px]:gap-1.5 max-[1439px]:px-1.5 max-[1439px]:py-1"
       style={{ border: "1px solid transparent" }}
     >
       <span
@@ -68,7 +59,7 @@ export function ForemanScoreRow({
 
       <span className="min-w-0 flex-1">
         <span
-          className="block truncate text-[13px] font-medium group-hover:underline"
+          className="block truncate text-[13px] font-medium group-hover:underline max-[1439px]:text-xs"
           style={{ color: "var(--text-primary)" }}
         >
           {name}
@@ -116,10 +107,13 @@ function RankingSection({
   showDelta?: boolean;
 }) {
   return (
-    <div className="rounded-lg p-2.5" style={{ background: `${accent}0d`, border: `1px solid ${accent}26` }}>
+    <div
+      className="min-w-0 rounded-lg p-[var(--space-compact-padding)]"
+      style={{ background: `${accent}0d`, border: `1px solid ${accent}26` }}
+    >
       <div className="mb-2 flex items-center gap-1.5 px-1">
         <Icon size={13} strokeWidth={2.25} style={{ color: accent }} />
-        <p className="text-[11px] font-semibold uppercase tracking-wide" style={{ color: accent }}>
+        <p className="text-label" style={{ color: accent }}>
           {title}
         </p>
       </div>
@@ -128,10 +122,10 @@ function RankingSection({
         {!isLoading && (!items || items.length === 0) && <EmptyState message="Veri yok" />}
         {items?.map((item, i) => (
           <ForemanScoreRow
-            key={item.foreman_id}
-            id={item.foreman_id}
-            name={item.full_name}
-            score={item.total_score}
+            key={item.foremanId}
+            id={item.foremanId}
+            name={item.fullName}
+            score={scoreOf(item)}
             rank={i + 1}
             color={item.level.color}
             showRankTint={highlightRanks}
@@ -170,28 +164,38 @@ export function ForemanRankingCard({
   onViewAll: () => void;
 }) {
   return (
-    <div className="rounded-lg p-5" style={{ background: "var(--surface)", border: "1px solid var(--border)" }}>
-      <div className="mb-4 flex flex-wrap items-start justify-between gap-2">
+    <div
+      className="min-w-0 rounded-lg p-[var(--space-card-padding)]"
+      style={{ background: "var(--surface)", border: "1px solid var(--border)" }}
+    >
+      <div className="mb-[var(--space-card-header-gap)] flex flex-wrap items-start justify-between gap-2">
         <div>
-          <h3 className="text-[14px] font-semibold" style={{ color: "var(--text-primary)" }}>
+          <h3 className="text-card-title" style={{ color: "var(--text-primary)" }}>
             Formen Performans Sıralaması
           </h3>
-          <p className="mt-0.5 text-xs" style={{ color: "var(--text-muted)" }}>
+          <p className="text-metadata mt-0.5" style={{ color: "var(--text-muted)" }}>
             Seçili dönemin genel KPI puanlarına göre sıralama
           </p>
         </div>
         <span
-          className="shrink-0 rounded-full px-2.5 py-1 text-[11px] font-medium"
+          className="text-metadata shrink-0 rounded-full px-2.5 py-1"
           style={{ background: "var(--page-bg)", color: "var(--text-secondary)", border: "1px solid var(--border)" }}
         >
           {periodLabel(filters)} • {scopeLabel(filters)}
         </span>
       </div>
 
-      <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-4">
+      {/* 4 kart mümkün olduğunca uzun süre yan yana kalır (bkz. görev talimatı
+          "Formen Performans Sıralaması") — xl(1280) yerine 1150px'te geçer,
+          çünkü card içi padding/font zaten compact katmanda küçülüyor. sm:
+          yerine min-[640px]: kullanılıyor: Tailwind v4 arbitrary min-[Npx]
+          variant'ları isimli breakpoint'lerden ayrı ve daha önce bir CSS
+          bloğunda üretiyor, ikisini aynı property'de karıştırmak (ör. sm: +
+          min-[1150px]:) cascade sırasını bozar — bkz. ExecutiveHero'daki not. */}
+      <div className="grid grid-cols-1 gap-[var(--space-card-gap)] min-[640px]:grid-cols-2 min-[1150px]:grid-cols-4">
         <RankingSection
           title="En Yüksek Performans"
-          accent="#16a34a"
+          accent="#15803d"
           icon={Trophy}
           items={topItems}
           isLoading={topLoading}
@@ -200,7 +204,7 @@ export function ForemanRankingCard({
         />
         <RankingSection
           title="Gelişim Alanı"
-          accent="#ea580c"
+          accent="#ca8a04"
           icon={TrendingDown}
           items={bottomItems}
           isLoading={bottomLoading}
@@ -209,7 +213,7 @@ export function ForemanRankingCard({
         />
         <RankingSection
           title="Gelişim Gösteren Formenler"
-          accent="#0d9488"
+          accent="#15803d"
           icon={TrendingUp}
           items={improvingItems}
           isLoading={!!improvingLoading}
@@ -219,7 +223,7 @@ export function ForemanRankingCard({
         />
         <RankingSection
           title="En Fazla Performans Kaybı"
-          accent="#b91c1c"
+          accent="#e90128"
           icon={TrendingDown}
           items={decliningItems}
           isLoading={!!decliningLoading}
@@ -232,7 +236,7 @@ export function ForemanRankingCard({
       <button
         onClick={onViewAll}
         className="group mt-4 inline-flex w-full items-center justify-center gap-1.5 rounded-md py-2 text-[13px] font-medium transition-colors hover:bg-[var(--page-bg)]"
-        style={{ border: "1px solid var(--border)", color: "var(--accent)" }}
+        style={{ border: "1px solid var(--border)", color: "var(--primary)" }}
       >
         Tüm formen sıralamasını görüntüle
         <ArrowRight size={14} strokeWidth={2} className="transition-transform duration-150 group-hover:translate-x-0.5" />

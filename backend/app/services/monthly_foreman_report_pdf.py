@@ -18,6 +18,7 @@ CRITICAL_BG = colors.HexColor("#fef2f2")
 CRITICAL_BORDER = colors.HexColor("#dc2626")
 CONGRATS_BG = colors.HexColor("#f0fdf4")
 CONGRATS_BORDER = colors.HexColor("#16a34a")
+OUTSTANDING_COLOR = colors.HexColor("#b45309")
 
 _BAR_WIDTH = 6 * cm
 _BAR_MAX_SCORE = 120.0
@@ -52,6 +53,21 @@ def _level_chip(level: dict | None, styles: dict) -> Table:
         ("TEXTCOLOR", (0, 0), (-1, -1), colors.white),
         ("FONTNAME", (0, 0), (-1, -1), PDF_FONT_BOLD),
         ("FONTSIZE", (0, 0), (-1, -1), 8),
+        ("ALIGN", (0, 0), (-1, -1), "CENTER"),
+        ("TOPPADDING", (0, 0), (-1, -1), 3),
+        ("BOTTOMPADDING", (0, 0), (-1, -1), 3),
+    ]))
+    return chip
+
+
+def _outstanding_chip() -> Table:
+    chip = Table([["ÜSTÜN PERFORMANS"]], colWidths=[3.5 * cm])
+    chip.setStyle(TableStyle([
+        ("BACKGROUND", (0, 0), (-1, -1), colors.HexColor("#fffbeb")),
+        ("TEXTCOLOR", (0, 0), (-1, -1), OUTSTANDING_COLOR),
+        ("BOX", (0, 0), (-1, -1), 1, OUTSTANDING_COLOR),
+        ("FONTNAME", (0, 0), (-1, -1), PDF_FONT_BOLD),
+        ("FONTSIZE", (0, 0), (-1, -1), 7.5),
         ("ALIGN", (0, 0), (-1, -1), "CENTER"),
         ("TOPPADDING", (0, 0), (-1, -1), 3),
         ("BOTTOMPADDING", (0, 0), (-1, -1), 3),
@@ -94,6 +110,19 @@ def render_monthly_foreman_report_pdf(report_data: dict) -> bytes:
             f"Şef: {_escape(org.get('chief_name'))}", meta_style
         ))
     elements.append(Paragraph(f"Rapor oluşturulma tarihi: {report_data['generated_at'][:10]}", small_style))
+
+    organization_history = report_data.get("organization_history") or []
+    if len(organization_history) > 1:
+        elements.append(Spacer(1, 4))
+        elements.append(Paragraph("Ay içinde organizasyon değişikliği:", small_style))
+        for entry in organization_history:
+            plants_text = ", ".join(p["name"] for p in entry["plants"])
+            elements.append(Paragraph(
+                f"{_escape(entry['date_from'])} – {_escape(entry['date_to'])}: "
+                f"{_escape(entry.get('factory_name'))} &nbsp;·&nbsp; {_escape(plants_text)} &nbsp;·&nbsp; "
+                f"Şef: {_escape(entry.get('chief_name'))}", small_style
+            ))
+
     elements.append(Spacer(1, 8))
     elements.append(HRFlowable(width="100%", color=colors.HexColor("#e5e7eb"), thickness=1))
 
@@ -111,6 +140,16 @@ def render_monthly_foreman_report_pdf(report_data: dict) -> bytes:
     )
     summary_table.setStyle(TableStyle([("VALIGN", (0, 0), (-1, -1), "MIDDLE")]))
     elements.append(summary_table)
+    if overall.get("operational_score") is not None:
+        elements.append(Spacer(1, 2))
+        elements.append(Paragraph(
+            f"Genel Performans = Operasyonel Performans ({overall['operational_score']:.1f}) "
+            f"+ Operational Impact+ Bonusu (+{overall['contribution_bonus']})",
+            small_style,
+        ))
+    if overall.get("outstanding_performance"):
+        elements.append(Spacer(1, 4))
+        elements.append(_outstanding_chip())
 
     elements.append(Paragraph("KPI Detayları", heading_style))
     for kpi in report_data["kpis"]:

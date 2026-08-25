@@ -6,16 +6,30 @@ import random
 import uuid
 from collections import defaultdict
 from dataclasses import dataclass, field
-from datetime import date, datetime, timedelta, timezone
+from datetime import date, datetime, timedelta
 
 from sqlalchemy.orm import Session
 
+from app.core import clock
 from app.models.enums import SourceSystem
 from app.models.production import CompanyCalendarDay, ForemanWorkCalendar, Product, ProductionLine, ProductionRecord
+from app.services.kpi_engine import SHIFT_MINUTES
 from app.services.shift_rotation import actual_shift_for_date
 from app.services.synthetic.reference_data import ReferenceData
 
 FIXED_HOLIDAYS_MMDD = {(1, 1), (4, 23), (5, 1), (5, 19), (7, 15), (8, 30), (10, 29)}
+
+
+def shift_window_utc(production_date: date, shift) -> tuple[datetime, datetime]:
+    """`production_date` iş tarihinde çalışan vardiyanın UTC [start, end) aralığını döndürür.
+
+    Yerel başlangıç/bitiş saatleri sabit offset yerine `settings.timezone` üzerinden
+    `clock.to_utc` ile bağlanır; tarihsel DST kuralları doğru uygulanır.
+    """
+    end_date = production_date + timedelta(days=1) if shift.crosses_midnight else production_date
+    start = clock.to_utc(datetime.combine(production_date, shift.start_time))
+    end = clock.to_utc(datetime.combine(end_date, shift.end_time))
+    return start, end
 
 PRODUCT_CATALOG = [
     dict(code="MLZ-001", name="Yem Tipi A - 40gr Paket", standard_gram=40.0, tolerance_pct=0.05),
@@ -110,8 +124,65 @@ def _build_plant_profiles(plants, rng: random.Random) -> dict:
     return {p.id: {"base": rng.uniform(-0.12, 0.12), "trend": rng.uniform(-0.00015, 0.00025)} for p in plants}
 
 
-def _build_foreman_profiles(foremen, rng: random.Random) -> dict:
-    return {f.id: {"skill": rng.uniform(-0.35, 0.35), "trend": rng.uniform(-0.0004, 0.0004)} for f in foremen}
+PERFORMANCE_TIER_WEIGHTS = {"LOW": 0.275, "MEDIUM": 0.375, "HIGH": 0.35}
+TIER_SKILL_CENTER = {"LOW": -2.35, "MEDIUM": -0.60, "HIGH": 0.12}
+TIER_SKILL_SPREAD = {"LOW": 0.45, "MEDIUM": 0.32, "HIGH": 0.42}
+KPI_SKILL_DECORRELATION = 0.22
+RECOVERY_SKILL_SPREAD = 0.35
+ASSIGNMENT_SKILL_SIGMA = 0.05
+DAILY_SKILL_SIGMA = 0.07
+DAY_CONTEXT_SIGMA = 0.03
+YEAR_SKILL_SIGMA = 0.25
+
+AGIR_GITME_SENSITIVITY = 3.0
+AGIR_GITME_TARGET_EXCESS_FRACTION = 0.015
+SCRAP_FRACTION_BASELINE = 0.05
+SCRAP_FRACTION_SENSITIVITY = 0.028
+RECOVERABLE_FRACTION_BASELINE = 0.40
+RECOVERABLE_FRACTION_SENSITIVITY = 0.16
+DOWNTIME_TECHNICAL_BASELINE_MIN = 43.0
+DOWNTIME_MANUFACTURING_BASELINE_MIN = 29.0
+INKITA_SENSITIVITY = 0.55
+PRODUCTION_FACTOR_SENSITIVITY = 0.35
+
+
+def _assign_foreman_tiers(foremen, rng: random.Random) -> dict:
+    n = len(foremen)
+    tier_names = list(PERFORMANCE_TIER_WEIGHTS)
+    counts: dict[str, int] = {}
+    remaining = n
+    for i, tier in enumerate(tier_names):
+        if i == len(tier_names) - 1:
+            counts[tier] = remaining
+        else:
+            count = round(n * PERFORMANCE_TIER_WEIGHTS[tier])
+            counts[tier] = count
+            remaining -= count
+    pool: list[str] = []
+    for tier, count in counts.items():
+        pool.extend([tier] * count)
+    rng.shuffle(pool)
+    return {f.id: tier for f, tier in zip(foremen, pool)}
+
+
+def _build_foreman_profiles(foremen, tiers_by_foreman: dict, rng: random.Random) -> dict:
+    profiles: dict = {}
+    for f in foremen:
+        tier = tiers_by_foreman[f.id]
+        center = TIER_SKILL_CENTER[tier] + rng.uniform(-TIER_SKILL_SPREAD[tier], TIER_SKILL_SPREAD[tier])
+        skills = {
+            "agir_gitme": center + rng.uniform(-KPI_SKILL_DECORRELATION, KPI_SKILL_DECORRELATION),
+            "scrap": center + rng.uniform(-KPI_SKILL_DECORRELATION, KPI_SKILL_DECORRELATION),
+            "recovery": rng.uniform(-RECOVERY_SKILL_SPREAD, RECOVERY_SKILL_SPREAD),
+            "inkita": center + rng.uniform(-KPI_SKILL_DECORRELATION, KPI_SKILL_DECORRELATION),
+            "plana_uyum": center + rng.uniform(-KPI_SKILL_DECORRELATION, KPI_SKILL_DECORRELATION),
+        }
+        profiles[f.id] = {"tier": tier, "skills": skills, "trend": rng.uniform(-0.0004, 0.0004)}
+    return profiles
+
+
+def _build_assignment_offsets(assignments, rng: random.Random) -> dict:
+    return {(a.foreman_id, a.plant_id): rng.gauss(0, ASSIGNMENT_SKILL_SIGMA) for a in assignments}
 
 
 def _build_maintenance_windows(plants, rng: random.Random, period_start: date, period_end: date) -> dict:
@@ -149,7 +220,9 @@ def seed_production_data(
     result.holiday_dates = _seed_holidays(db, period_start, period_end)
 
     plant_profiles = _build_plant_profiles(ref.plants, rng)
-    foreman_profiles = _build_foreman_profiles(ref.foremen, rng)
+    foreman_tiers = _assign_foreman_tiers(ref.foremen, rng)
+    foreman_profiles = _build_foreman_profiles(ref.foremen, foreman_tiers, rng)
+    assignment_offsets = _build_assignment_offsets(ref.assignments, rng)
     maintenance_days = _build_maintenance_windows(ref.plants, rng, period_start, period_end)
     plant_products = _plant_product_pool(ref.plants, result.products, rng)
 
@@ -174,16 +247,19 @@ def seed_production_data(
             continue
 
         anchor_shift = shifts_by_id[foreman_assignments[0].shift_id]
+        year_offsets = {year: rng.gauss(0, YEAR_SKILL_SIGMA) for year in range(range_start.year, range_end.year + 1)}
 
         for assignment in foreman_assignments:
             plant_profile = plant_profiles[assignment.plant_id]
             plant_lines = result.lines_by_plant[assignment.plant_id]
             products = plant_products[assignment.plant_id]
 
+            assignment_offset = assignment_offsets.get((foreman.id, assignment.plant_id), 0.0)
+            skills = f_profile["skills"]
+
             d = range_start
             while d <= range_end:
                 shift = actual_shift_for_date(d, anchor_shift, ref.shifts)
-                night_penalty = -0.05 if shift.code == "V2" else 0.0
 
                 is_holiday = d in result.holiday_dates
                 is_absent = (not is_holiday) and rng.random() < 0.03
@@ -203,50 +279,66 @@ def seed_production_data(
                     continue
 
                 weekday = d.weekday()
-                weekend_factor = -0.10 if weekday >= 5 else 0.0
+                weekend_factor = -0.033 if weekday >= 5 else 0.0
+                night_penalty = -0.017 if shift.code == "V2" else 0.0
                 is_maintenance = d in maintenance_days.get(assignment.plant_id, set())
-                maintenance_factor = -0.55 if is_maintenance else 0.0
+                maintenance_factor = -0.18 if is_maintenance else 0.0
 
                 anomaly = 0.0
                 if rng.random() < params.anomaly_rate:
-                    anomaly = rng.choice([-1, 1]) * rng.uniform(0.15, 0.35)
+                    anomaly = rng.choice([-1, 1]) * rng.uniform(0.05, 0.12)
 
-                pf = (
+                day_context = (
                     plant_profile["base"] + plant_profile["trend"] * (d - period_start).days
-                    + f_profile["skill"] + f_profile["trend"] * (d - tenure_start).days
+                    + f_profile["trend"] * (d - tenure_start).days + assignment_offset
                     + night_penalty + weekend_factor + maintenance_factor
-                    + _seasonal_factor(d) + anomaly + rng.gauss(0, 0.05)
+                    + _seasonal_factor(d) * 0.4 + anomaly + rng.gauss(0, DAY_CONTEXT_SIGMA)
+                    + year_offsets[d.year]
                 )
-                pf = _clip(pf, -0.6, 0.45)
 
-                downtime_multiplier = _clip(1.0 - pf * 1.4, 0.15, 3.2)
-                technical_minutes = max(0.0, 45.0 * downtime_multiplier + rng.gauss(0, 6))
-                manufacturing_minutes = max(0.0, 30.0 * downtime_multiplier + rng.gauss(0, 4))
+                def _daily_skill(base_skill: float) -> float:
+                    return base_skill + day_context + rng.gauss(0, DAILY_SKILL_SIGMA)
+
+                skill_agir = _daily_skill(skills["agir_gitme"])
+                skill_scrap = _daily_skill(skills["scrap"])
+                skill_recovery = _daily_skill(skills["recovery"])
+                skill_inkita = _daily_skill(skills["inkita"])
+                skill_plana = _daily_skill(skills["plana_uyum"])
+
+                downtime_multiplier = _clip(1.0 - skill_inkita * INKITA_SENSITIVITY, 0.15, 3.2)
+                technical_minutes = max(0.0, DOWNTIME_TECHNICAL_BASELINE_MIN * downtime_multiplier + rng.gauss(0, 6))
+                manufacturing_minutes = max(0.0, DOWNTIME_MANUFACTURING_BASELINE_MIN * downtime_multiplier + rng.gauss(0, 4))
                 other_minutes = max(0.0, rng.uniform(10, 25) + rng.gauss(0, 3))
                 if is_maintenance:
                     other_minutes += rng.uniform(90, 220)
 
-                production_factor = _clip(1.0 + pf - max(0.0, downtime_multiplier - 1) * 0.12, 0.15, 1.45)
+                production_factor = _clip(1.0 + skill_plana * PRODUCTION_FACTOR_SENSITIVITY, 0.15, 1.8)
                 planned_qty = 1000.0
                 actual_qty = max(0.0, planned_qty * production_factor + rng.gauss(0, 15))
 
                 scrap_fraction = _clip(
-                    0.03 * (1 + max(0.0, downtime_multiplier - 1) * 0.6) - pf * 0.01 + rng.gauss(0, 0.004), 0.0, 0.35
+                    SCRAP_FRACTION_BASELINE - skill_scrap * SCRAP_FRACTION_SENSITIVITY + rng.gauss(0, 0.004), 0.0, 0.35
                 )
                 scrap_qty = actual_qty * scrap_fraction
-                recoverable_fraction = _clip(0.65 + rng.gauss(0, 0.08), 0.3, 0.9)
+                recoverable_fraction = _clip(
+                    RECOVERABLE_FRACTION_BASELINE + skill_recovery * RECOVERABLE_FRACTION_SENSITIVITY
+                    + rng.gauss(0, 0.03), 0.05, 0.95,
+                )
                 iskarta_qty = scrap_qty * recoverable_fraction
                 gsf_qty = scrap_qty - iskarta_qty
 
                 product = rng.choice(products)
-                gram_baseline = float(product.standard_gram) if product.standard_gram is not None else 35.0
-                gram_overage = _clip(1.4 - pf * 5.5 + rng.gauss(0, 0.5), -1.2, 8.0)
-                measured_avg_gram = gram_baseline + gram_overage
+                if product.standard_gram is not None and product.upper_gram_limit is not None:
+                    standard_gram = float(product.standard_gram)
+                    threshold_overage = float(product.upper_gram_limit) - standard_gram
+                    neutral_overage = threshold_overage + AGIR_GITME_TARGET_EXCESS_FRACTION * standard_gram
+                    gram_overage = neutral_overage * (1 - skill_agir * AGIR_GITME_SENSITIVITY) + rng.gauss(0, 0.4)
+                    measured_avg_gram = standard_gram + gram_overage
+                else:
+                    measured_avg_gram = 35.0 + rng.gauss(0, 1.0)
                 gram_sample_count = rng.randint(15, 40)
 
-                planned_start = datetime.combine(d, shift.start_time, tzinfo=timezone.utc)
-                end_date = d + timedelta(days=1) if shift.crosses_midnight else d
-                planned_end = datetime.combine(end_date, shift.end_time, tzinfo=timezone.utc)
+                planned_start, planned_end = shift_window_utc(d, shift)
                 actual_start = planned_start + timedelta(minutes=rng.gauss(0, 4))
                 actual_end = planned_end + timedelta(minutes=rng.gauss(0, 6))
                 shift_hours = (planned_end - planned_start).total_seconds() / 3600.0
@@ -285,13 +377,35 @@ def seed_production_data(
                     technical_downtime_minutes=technical_minutes, manufacturing_downtime_minutes=manufacturing_minutes,
                     other_downtime_minutes=other_minutes,
                     plan_revision_no=1, plan_revision_at=planned_start - timedelta(days=1),
-                    source_updated_at=datetime.combine(d, datetime.min.time(), tzinfo=timezone.utc),
-                    imported_at=datetime.now(timezone.utc),
+                    source_updated_at=clock.to_utc(datetime.combine(d, datetime.min.time())),
+                    imported_at=clock.now_utc(),
                 )
                 db.add(record)
                 result.production_records.append(record)
 
                 d += timedelta(days=1)
 
+    _assign_shift_working_time(result.production_records)
+
     db.commit()
     return result
+
+
+def _assign_shift_working_time(records: list[ProductionRecord]) -> None:
+    """Her vardiya kaydı için working_time_minutes = 720 - shift_downtime_minutes hesaplar.
+
+    V1/V2 kendi downtime değerini kullanır; fabrika-gün canonical kaydı veya date-parity
+    ataması yoktur. Formen OEE yalnızca sorumlu olduğu vardiyayı yansıtır. Fabrika/dönem
+    OEE, analytics katmanında kapsamdaki vardiyaların pay/payda (çalışma dakikası/720)
+    toplamından üretilir. Hesap deterministiktir; RNG kullanılmaz.
+    """
+    for record in records:
+        if record.planned_start_at is None or record.planned_end_at is None:
+            continue
+        shift_downtime_minutes = (
+            float(record.technical_downtime_minutes or 0.0)
+            + float(record.manufacturing_downtime_minutes or 0.0)
+            + float(record.other_downtime_minutes or 0.0)
+        )
+        working_time_minutes = _clip(SHIFT_MINUTES - shift_downtime_minutes, 0.0, SHIFT_MINUTES)
+        record.working_time_minutes = round(working_time_minutes, 2)

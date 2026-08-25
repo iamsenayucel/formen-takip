@@ -1,7 +1,9 @@
 import { useMemo, useState } from "react";
-import { ChevronDown, X } from "lucide-react";
+import { ChevronDown, SlidersHorizontal, X } from "lucide-react";
 import { useFilterOptions, useForemen, useForemenByIds } from "../api/hooks";
-import { DATE_PRESETS, defaultDateRange, type FilterState } from "../hooks/useFilters";
+import { businessTodayIso, DATE_PRESETS, defaultDateRange, type FilterState } from "../hooks/useFilters";
+import { useDismissablePopover } from "../hooks/useDismissablePopover";
+import { summarizeNames } from "../lib/filterLabels";
 
 interface Props {
   filters: FilterState;
@@ -10,7 +12,7 @@ interface Props {
 }
 
 const inputClass =
-  "rounded-md border px-2.5 py-1.5 text-[13px] transition-colors focus:outline-none focus:ring-2 focus:ring-[var(--accent)]/30";
+  "rounded-md border px-2.5 py-1.5 text-[13px] transition-colors focus:outline-none focus:ring-2 focus:ring-[var(--accent)]/30 max-[1439px]:px-2 max-[1439px]:py-1 max-[1439px]:text-xs";
 const inputStyle = { borderColor: "var(--border-strong)", background: "var(--surface)", color: "var(--text-primary)" };
 
 export interface MultiSelectOption {
@@ -45,6 +47,7 @@ export function MultiSelect({
     setOpen(false);
     setQuery("");
   };
+  const triggerRef = useDismissablePopover(open, close);
 
   const showSearch = options.length > SEARCH_THRESHOLD;
   const visibleOptions = useMemo(() => {
@@ -59,15 +62,18 @@ export function MultiSelect({
   return (
     <div className="relative">
       <button
+        ref={triggerRef}
         type="button"
         disabled={disabled}
         onClick={() => (open ? close() : setOpen(true))}
+        aria-haspopup="listbox"
+        aria-expanded={open}
         className={`flex min-w-32 items-center justify-between gap-2 ${inputClass} disabled:opacity-40`}
         style={inputStyle}
       >
         <span>
           {label}
-          {selected.length > 0 && <span className="ml-1 font-medium" style={{ color: "var(--accent)" }}>({selected.length})</span>}
+          {selected.length > 0 && <span className="ml-1 font-medium" style={{ color: "var(--primary)" }}>({selected.length})</span>}
         </span>
         <ChevronDown size={13} strokeWidth={2} style={{ color: "var(--text-muted)" }} />
       </button>
@@ -86,6 +92,7 @@ export function MultiSelect({
                   value={query}
                   onChange={(e) => setQuery(e.target.value)}
                   placeholder="Ara..."
+                  aria-label={`${label} ara`}
                   className="w-full rounded border px-2 py-1 text-[13px] focus:outline-none focus:ring-2 focus:ring-[var(--accent)]/30"
                   style={inputStyle}
                 />
@@ -136,7 +143,8 @@ function ForemanFilterSelect({
 }) {
   const [open, setOpen] = useState(false);
   const [query, setQuery] = useState("");
-  const results = useForemen({ search: query || undefined, page_size: 8 });
+  const results = useForemen({ search: query || undefined }, 8);
+  const resultItems = results.data?.pages.flatMap((page) => page.items) ?? [];
 
   const toggle = (id: string) => {
     onChange(selected.includes(id) ? selected.filter((x) => x !== id) : [...selected, id]);
@@ -146,18 +154,22 @@ function ForemanFilterSelect({
     setOpen(false);
     setQuery("");
   };
+  const triggerRef = useDismissablePopover(open, close);
 
   return (
     <div className="relative">
       <button
+        ref={triggerRef}
         type="button"
         onClick={() => (open ? close() : setOpen(true))}
+        aria-haspopup="listbox"
+        aria-expanded={open}
         className={`flex min-w-32 items-center justify-between gap-2 ${inputClass}`}
         style={inputStyle}
       >
         <span>
           Formen
-          {selected.length > 0 && <span className="ml-1 font-medium" style={{ color: "var(--accent)" }}>({selected.length})</span>}
+          {selected.length > 0 && <span className="ml-1 font-medium" style={{ color: "var(--primary)" }}>({selected.length})</span>}
         </span>
         <ChevronDown size={13} strokeWidth={2} style={{ color: "var(--text-muted)" }} />
       </button>
@@ -175,6 +187,7 @@ function ForemanFilterSelect({
                 value={query}
                 onChange={(e) => setQuery(e.target.value)}
                 placeholder="Ad, soyad veya sicil no ara..."
+                aria-label="Formen ara"
                 className="w-full rounded border px-2 py-1 text-[13px] focus:outline-none focus:ring-2 focus:ring-[var(--accent)]/30"
                 style={inputStyle}
               />
@@ -183,10 +196,10 @@ function ForemanFilterSelect({
               {results.isLoading && (
                 <div className="p-2 text-xs" style={{ color: "var(--text-muted)" }}>Aranıyor...</div>
               )}
-              {results.data && results.data.items.length === 0 && (
+              {results.data && resultItems.length === 0 && (
                 <div className="p-2 text-xs" style={{ color: "var(--text-muted)" }}>Eşleşen formen yok</div>
               )}
-              {results.data?.items.map((f) => (
+              {resultItems.map((f) => (
                 <label
                   key={f.id}
                   className="flex cursor-pointer items-start gap-2 rounded px-2 py-1.5 text-[13px] hover:bg-[var(--page-bg)]"
@@ -199,7 +212,7 @@ function ForemanFilterSelect({
                     onChange={() => toggle(f.id)}
                   />
                   <span className="min-w-0 truncate">
-                    {f.full_name} <span style={{ color: "var(--text-muted)" }}>— {f.employee_number}</span>
+                    {f.fullName} <span style={{ color: "var(--text-muted)" }}>— {f.employeeNumber}</span>
                   </span>
                 </label>
               ))}
@@ -240,16 +253,14 @@ function ActiveFiltersStrip({ chips }: { chips: ActiveChip[] }) {
   );
 }
 
-function summarizeNames(names: string[], max = 2): string {
-  if (names.length <= max) return names.join(", ");
-  return `${names.slice(0, max).join(", ")} +${names.length - max}`;
-}
-
 export function FilterBar({ filters, setFilters, clearFilters }: Props) {
   const { data: options, isLoading } = useFilterOptions(
     filters.plantIds.join(",") || undefined,
     filters.factoryIds.join(",") || undefined
   );
+
+  const advancedActiveCount = filters.chiefIds.length + filters.shiftIds.length + filters.kpiIds.length + filters.foremanIds.length;
+  const [advancedOpen, setAdvancedOpen] = useState(advancedActiveCount > 0);
 
   const activeCount =
     filters.plantIds.length + filters.factoryIds.length + filters.chiefIds.length +
@@ -257,7 +268,7 @@ export function FilterBar({ filters, setFilters, clearFilters }: Props) {
 
   const foremenLookup = useForemenByIds(filters.foremanIds);
   const foremanNameById = useMemo(
-    () => new Map((foremenLookup.data?.items ?? []).map((f) => [f.id, f.full_name])),
+    () => new Map((foremenLookup.data?.items ?? []).map((f) => [f.id, f.fullName])),
     [foremenLookup.data]
   );
 
@@ -268,7 +279,7 @@ export function FilterBar({ filters, setFilters, clearFilters }: Props) {
   const chiefOptions = useMemo(
     () =>
       (options?.chiefs ?? []).map((c) => {
-        const names = c.plant_ids.map((id) => plantNameById.get(id)).filter((n): n is string => !!n);
+        const names = c.plantIds.map((id) => plantNameById.get(id)).filter((n): n is string => !!n);
         return {
           id: c.id,
           name: c.name,
@@ -279,11 +290,11 @@ export function FilterBar({ filters, setFilters, clearFilters }: Props) {
   );
 
   const plantIdsByChief = useMemo(
-    () => new Map((options?.chiefs ?? []).map((c) => [c.id, c.plant_ids])),
+    () => new Map((options?.chiefs ?? []).map((c) => [c.id, c.plantIds])),
     [options]
   );
   const factoryIdByPlant = useMemo(
-    () => new Map((options?.plants ?? []).map((p) => [p.id, p.factory_id])),
+    () => new Map((options?.plants ?? []).map((p) => [p.id, p.factoryId])),
     [options]
   );
 
@@ -372,115 +383,144 @@ export function FilterBar({ filters, setFilters, clearFilters }: Props) {
   ];
 
   return (
-    <div className="sticky top-0 z-30 rounded-lg shadow-sm" style={{ background: "var(--surface)", border: "1px solid var(--border)" }}>
-    <div
-      className="flex flex-wrap items-center gap-2 p-3"
-    >
-      <select
-        className={inputClass}
-        style={inputStyle}
-        onChange={(e) => {
-          const preset = DATE_PRESETS.find((p) => p.label === e.target.value);
-          if (preset) {
-            const [from, to] = preset.getRange();
-            setFilters({ dateFrom: from, dateTo: to });
-          }
-        }}
-        defaultValue=""
-      >
-        <option value="" disabled>
-          Hazır tarih aralığı
-        </option>
-        {DATE_PRESETS.map((p) => (
-          <option key={p.label} value={p.label}>
-            {p.label}
-          </option>
-        ))}
-      </select>
-
-      <input
-        type="date"
-        value={filters.dateFrom}
-        max={filters.dateTo}
-        onChange={(e) => setFilters({ dateFrom: e.target.value })}
-        className={inputClass}
-        style={inputStyle}
-      />
-      <span style={{ color: "var(--text-muted)" }}>–</span>
-      <input
-        type="date"
-        value={filters.dateTo}
-        min={filters.dateFrom}
-        max={new Date().toISOString().slice(0, 10)}
-        onChange={(e) => setFilters({ dateTo: e.target.value })}
-        className={inputClass}
-        style={inputStyle}
-      />
-
-      <div className="mx-1 h-6 w-px" style={{ background: "var(--border)" }} />
-
-      <button
-        type="button"
-        disabled
-        title="Sistem şu an yalnızca Karaman lokasyonunu kapsıyor"
-        className={`flex min-w-28 items-center justify-between gap-2 ${inputClass} disabled:opacity-70`}
-        style={inputStyle}
-      >
-        <span>Lokasyon: Karaman</span>
-      </button>
-
-      <MultiSelect
-        label="Fabrika"
-        options={options?.factories ?? []}
-        selected={filters.factoryIds}
-        onChange={handleFactoryChange}
-        disabled={isLoading}
-      />
-      <MultiSelect
-        label="Tesis"
-        options={options?.plants ?? []}
-        selected={filters.plantIds}
-        onChange={handlePlantChange}
-        disabled={isLoading}
-      />
-      <MultiSelect
-        label="Şef"
-        options={chiefOptions}
-        selected={filters.chiefIds}
-        onChange={(ids) => setFilters({ chiefIds: ids })}
-        disabled={isLoading}
-      />
-      <MultiSelect
-        label="Vardiya"
-        options={options?.shifts ?? []}
-        selected={filters.shiftIds}
-        onChange={(ids) => setFilters({ shiftIds: ids })}
-        disabled={isLoading}
-      />
-      <MultiSelect
-        label="KPI"
-        options={options?.kpis ?? []}
-        selected={filters.kpiIds}
-        onChange={(ids) => setFilters({ kpiIds: ids })}
-        disabled={isLoading}
-      />
-      <ForemanFilterSelect
-        selected={filters.foremanIds}
-        onChange={(ids) => setFilters({ foremanIds: ids })}
-      />
-
-      {activeCount > 0 && (
-        <button
-          onClick={clearFilters}
-          className="ml-auto flex items-center gap-1 rounded-md px-2.5 py-1.5 text-xs font-medium hover:bg-[var(--page-bg)]"
-          style={{ color: "var(--accent)" }}
+    <div className="sticky top-0 z-30 rounded-lg" style={{ background: "var(--surface)", border: "1px solid var(--border)", boxShadow: "var(--shadow-panel)" }}>
+      <div className="flex flex-wrap items-center gap-2 p-3 max-[1439px]:gap-1.5 max-[1439px]:p-2">
+        <select
+          className={inputClass}
+          style={inputStyle}
+          onChange={(e) => {
+            const preset = DATE_PRESETS.find((p) => p.label === e.target.value);
+            if (preset) {
+              const [from, to] = preset.getRange();
+              setFilters({ dateFrom: from, dateTo: to });
+            }
+          }}
+          defaultValue=""
         >
-          <X size={13} strokeWidth={2} />
-          Filtreleri temizle ({activeCount})
+          <option value="" disabled>
+            Hazır tarih aralığı
+          </option>
+          {DATE_PRESETS.map((p) => (
+            <option key={p.label} value={p.label}>
+              {p.label}
+            </option>
+          ))}
+        </select>
+
+        <input
+          type="date"
+          value={filters.dateFrom}
+          max={filters.dateTo}
+          onChange={(e) => setFilters({ dateFrom: e.target.value })}
+          className={inputClass}
+          style={inputStyle}
+        />
+        <span style={{ color: "var(--text-muted)" }}>–</span>
+        <input
+          type="date"
+          value={filters.dateTo}
+          min={filters.dateFrom}
+          max={businessTodayIso()}
+          onChange={(e) => setFilters({ dateTo: e.target.value })}
+          className={inputClass}
+          style={inputStyle}
+        />
+
+        <div className="mx-1 h-6 w-px" style={{ background: "var(--border)" }} />
+
+        <button
+          type="button"
+          disabled
+          title="Sistem şu an yalnızca Karaman lokasyonunu kapsıyor"
+          className={`flex min-w-28 items-center justify-between gap-2 ${inputClass} disabled:opacity-70`}
+          style={inputStyle}
+        >
+          <span>Lokasyon: Karaman</span>
         </button>
+
+        <MultiSelect
+          label="Fabrika"
+          options={options?.factories ?? []}
+          selected={filters.factoryIds}
+          onChange={handleFactoryChange}
+          disabled={isLoading}
+        />
+        <MultiSelect
+          label="Tesis"
+          options={options?.plants ?? []}
+          selected={filters.plantIds}
+          onChange={handlePlantChange}
+          disabled={isLoading}
+        />
+
+        <button
+          type="button"
+          onClick={() => setAdvancedOpen((o) => !o)}
+          aria-expanded={advancedOpen}
+          className="flex items-center gap-1.5 rounded-md px-2.5 py-1.5 text-[13px] font-medium transition-colors hover:bg-[var(--page-bg)]"
+          style={{ color: advancedOpen || advancedActiveCount > 0 ? "var(--primary)" : "var(--text-secondary)" }}
+        >
+          <SlidersHorizontal size={13} strokeWidth={2} />
+          Gelişmiş filtreler
+          {advancedActiveCount > 0 && (
+            <span className="font-semibold">({advancedActiveCount})</span>
+          )}
+          <ChevronDown
+            size={13}
+            strokeWidth={2}
+            className={`transition-transform duration-150 ${advancedOpen ? "rotate-180" : ""}`}
+          />
+        </button>
+
+        {activeCount > 0 && (
+          <button
+            onClick={clearFilters}
+            className="ml-auto flex items-center gap-1 rounded-md px-2.5 py-1.5 text-xs font-medium hover:bg-[var(--page-bg)]"
+            style={{ color: "var(--primary)" }}
+          >
+            <X size={13} strokeWidth={2} />
+            Filtreleri temizle ({activeCount})
+          </button>
+        )}
+      </div>
+
+      {advancedOpen && (
+        <div
+          className="flex flex-wrap items-center gap-2 px-3 pb-3"
+          style={{ borderTop: "1px solid var(--border-subtle)", paddingTop: "0.75rem" }}
+        >
+          <span className="text-label mr-1" style={{ color: "var(--text-muted)" }}>
+            Detay:
+          </span>
+          <MultiSelect
+            label="Şef"
+            options={chiefOptions}
+            selected={filters.chiefIds}
+            onChange={(ids) => setFilters({ chiefIds: ids })}
+            disabled={isLoading}
+          />
+          <MultiSelect
+            label="Vardiya"
+            options={options?.shifts ?? []}
+            selected={filters.shiftIds}
+            onChange={(ids) => setFilters({ shiftIds: ids })}
+            disabled={isLoading}
+          />
+          <MultiSelect
+            label="KPI"
+            options={options?.kpis ?? []}
+            selected={filters.kpiIds}
+            onChange={(ids) => setFilters({ kpiIds: ids })}
+            disabled={isLoading}
+          />
+          <ForemanFilterSelect
+            selected={filters.foremanIds}
+            onChange={(ids) => setFilters({ foremanIds: ids })}
+          />
+        </div>
       )}
-    </div>
-    <ActiveFiltersStrip chips={chips} />
+
+      <ActiveFiltersStrip chips={chips} />
     </div>
   );
 }

@@ -20,9 +20,15 @@ ANALYSIS_MODE = ('SINGLE_CONTEXT', 'TOOL_CALLING')
 
 
 def upgrade() -> None:
-    for enum_name in _STATUS_ENUM_NAMES:
-        for value in _NEW_STATUS_VALUES:
-            op.execute(f"ALTER TYPE {enum_name} ADD VALUE IF NOT EXISTS '{value}'")
+    # Postgres yeni enum değerini eklendiği transaction içinde kullanmayı reddeder
+    # (UnsafeNewEnumValueUsage). `alembic upgrade head` varsayılan olarak tüm zinciri
+    # tek transaction içinde çalıştırır; sonraki b9f2d4a6c8e1 migration'ı index koşulunda
+    # 'QUEUED' gibi değerleri filtrelediğinden, ADD VALUE ifadeleri önce ayrı commit edilmezse
+    # boş veritabanında migration başarısız olur.
+    with op.get_context().autocommit_block():
+        for enum_name in _STATUS_ENUM_NAMES:
+            for value in _NEW_STATUS_VALUES:
+                op.execute(f"ALTER TYPE {enum_name} ADD VALUE IF NOT EXISTS '{value}'")
 
     analysis_mode_type = postgresql.ENUM(*ANALYSIS_MODE, name='analysis_mode', create_type=False)
     analysis_mode_type.create(op.get_bind(), checkfirst=True)

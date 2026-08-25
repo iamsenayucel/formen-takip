@@ -7,9 +7,9 @@ interface Props {
 }
 
 const STAGES = [
-  { key: "problem", title: "Tespit Edilen Problem", icon: AlertTriangle, color: "#b91c1c", bg: "rgba(185,28,28,0.08)" },
-  { key: "solution", title: "Uygulanan Çözüm", icon: Wrench, color: "#b45309", bg: "rgba(180,83,9,0.08)" },
-  { key: "result", title: "Elde Edilen Sonuç", icon: CheckCircle2, color: "#15803d", bg: "rgba(21,128,61,0.08)" },
+  { key: "problem", title: "Tespit Edilen Problem", icon: AlertTriangle, color: "var(--status-negative)", bg: "var(--status-negative-bg)" },
+  { key: "solution", title: "Uygulanan Çözüm", icon: Wrench, color: "var(--status-neutral)", bg: "var(--status-neutral-bg)" },
+  { key: "result", title: "Elde Edilen Sonuç", icon: CheckCircle2, color: "var(--status-positive)", bg: "var(--status-positive-bg)" },
 ] as const;
 
 export function ProblemSolutionResultFlow({ problem, solution, result }: Props) {

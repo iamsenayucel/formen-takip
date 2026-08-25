@@ -1,59 +1,43 @@
-import { useMemo } from "react";
 import { useNavigate } from "react-router-dom";
 import { ArrowRight } from "lucide-react";
 import { useAnomalies, useAnomaly, useForemen } from "../api/hooks";
 import { SeverityBadge, SEVERITY_CONFIG } from "./AnomalyBadges";
-import type { AnomalyListItem, AnomalySeverity, AnomalyStatus } from "../api/types";
+import { rankAnomaliesByPriority } from "../lib/anomalyMetrics";
+import type { AnomalyListItem } from "../api/types";
 
-const SEVERITY_RANK: Record<AnomalySeverity, number> = { critical: 4, high: 3, medium: 2, low: 1 };
-const OPEN_STATUSES: ReadonlySet<AnomalyStatus> = new Set(["new", "in_review", "action_pending"]);
-
-function pickMostCritical(items: AnomalyListItem[]): AnomalyListItem | null {
-  const open = items.filter((a) => OPEN_STATUSES.has(a.status));
-  if (open.length === 0) return null;
-  return [...open].sort((a, b) => {
-    const bySeverity = SEVERITY_RANK[b.severity] - SEVERITY_RANK[a.severity];
-    if (bySeverity !== 0) return bySeverity;
-    return Math.abs(b.deviation_percent) - Math.abs(a.deviation_percent);
-  })[0];
-}
+const MAX_CARDS = 3;
 
 function ForemanLabel({ code }: { code: string }) {
-  const result = useForemen({ search: code, page_size: 1 });
-  return <>{result.data?.items[0]?.full_name ?? code}</>;
+  const result = useForemen({ search: code }, 1);
+  return <>{result.data?.pages[0]?.items[0]?.fullName ?? code}</>;
 }
 
-export function CriticalAnomalyCard() {
+function CriticalAnomalyCardItem({ candidate }: { candidate: AnomalyListItem }) {
   const navigate = useNavigate();
-  const list = useAnomalies({ page_size: 50, page: 1 });
-  const candidate = useMemo(() => (list.data ? pickMostCritical(list.data.items) : null), [list.data]);
-  const detail = useAnomaly(candidate?.id);
-
-  if (list.isLoading || list.isError || !candidate) return null;
-
+  const detail = useAnomaly(candidate.id);
   const cfg = SEVERITY_CONFIG[candidate.severity];
-  const foremanCodes = detail.data?.foreman_codes ?? [];
+  const foremanCodes = detail.data?.foremanCodes ?? [];
 
   return (
     <button
       type="button"
       onClick={() => navigate(`/anomalies/${candidate.id}`)}
-      className="block w-full rounded-lg p-4 text-left transition-transform duration-150 hover:-translate-y-0.5"
+      className="flex h-full w-full min-w-0 flex-col rounded-lg p-[var(--space-card-padding-sm)] text-left transition-transform duration-150 hover:-translate-y-0.5"
       style={{ background: "var(--surface)", border: `1px solid ${cfg.color}40`, borderLeft: `4px solid ${cfg.color}` }}
     >
       <div className="flex flex-wrap items-center justify-between gap-2">
         <div className="flex items-center gap-2">
           <SeverityBadge severity={candidate.severity} />
           <span className="text-xs font-medium" style={{ color: "var(--text-muted)" }}>
-            {candidate.plant_name ?? "-"} · {candidate.kpi_name ?? candidate.anomaly_type_label}
+            {candidate.plantName ?? "-"} · {candidate.kpiName ?? candidate.anomalyTypeLabel}
           </span>
         </div>
         <span className="text-[11px] font-medium" style={{ color: "var(--text-muted)" }}>
-          {new Date(candidate.detected_at).toLocaleDateString("tr-TR")}
+          {new Date(candidate.detectedAt).toLocaleDateString("tr-TR")}
         </span>
       </div>
 
-      <p className="mt-2 text-sm font-semibold" style={{ color: "var(--text-primary)" }}>{candidate.title}</p>
+      <p className="text-card-title mt-2" style={{ color: "var(--text-primary)" }}>{candidate.title}</p>
 
       <div className="mt-2 flex flex-wrap items-center gap-x-4 gap-y-1 text-xs" style={{ color: "var(--text-secondary)" }}>
         {foremanCodes.length > 0 && (
@@ -61,15 +45,35 @@ export function CriticalAnomalyCard() {
             Formen: {foremanCodes.length === 1 ? <ForemanLabel code={foremanCodes[0]} /> : `${foremanCodes.length} formen`}
           </span>
         )}
-        <span>
-          Sapma: {candidate.deviation_percent >= 0 ? "+" : ""}%{candidate.deviation_percent.toFixed(1)}
+        <span className="font-semibold" style={{ color: cfg.color }}>
+          Sapma: {candidate.deviationPercent >= 0 ? "+" : ""}%{candidate.deviationPercent.toFixed(1)}
         </span>
       </div>
 
-      <span className="mt-3 inline-flex items-center gap-1 text-xs font-medium hover:underline" style={{ color: "var(--accent)" }}>
+      <span className="mt-auto inline-flex items-center gap-1 pt-3 text-xs font-medium hover:underline" style={{ color: "var(--primary)" }}>
         Analizi Gör
         <ArrowRight size={13} strokeWidth={2} />
       </span>
     </button>
+  );
+}
+
+// Dashboard'un "en kritik tespit" alanı — açık/kritik tespitleri Tespitler
+// listesindeki öncelik şeridiyle aynı kuralla (rankAnomaliesByPriority)
+// sıralar ve en önemli 3 tanesini aynı satırda yan yana gösterir.
+export function CriticalAnomalyCard() {
+  const list = useAnomalies({}, 50);
+  const candidates = list.data
+    ? rankAnomaliesByPriority(list.data.pages.flatMap((page) => page.items)).slice(0, MAX_CARDS)
+    : [];
+
+  if (list.isLoading || list.isError || candidates.length === 0) return null;
+
+  return (
+    <div className="grid grid-cols-1 gap-[var(--space-card-gap)] sm:grid-cols-2 xl:grid-cols-3">
+      {candidates.map((candidate) => (
+        <CriticalAnomalyCardItem key={candidate.id} candidate={candidate} />
+      ))}
+    </div>
   );
 }

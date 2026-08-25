@@ -10,6 +10,30 @@
 
 Tüm kolonlarda **DB seviyesinde `DEFAULT` tanımlı değildir** — varsayılan değerler (UUID üretimi, zaman damgaları, sayaç başlangıçları vb.) uygulama katmanında (SQLAlchemy ORM) uygulanıyor, veritabanı bunu bilmiyor. Bu, introspection'da her tabloda gözlemlenen tutarlı bir durumdur.
 
+> **⚠️ Bu doküman güncel değil (tarihsel snapshot).** Yukarıdaki `c7a1f9d0b2e3`
+> revizyonu, mevcut alembic HEAD'inden (`backend/alembic/versions/` içinde
+> `down_revision` zincirinin ucu — bu yazı itibarıyla `c7a1f9d0b2e3`'ten 10'dan
+> fazla migration ileride) çok gerideldir. O tarihten bu yana şema önemli
+> ölçüde değişti; en azından şunlar bu dokümana yansımamıştır:
+> - `chiefs.plant_id` kaldırıldı, yön tersine döndü (`plants.chief_id`) — bir
+>   şef artık tek bir tesise değil bir **bölgeye (zone)** sorumludur.
+> - `users` tablosu tamamen kaldırıldı — kimlik doğrulama artık Red Hat SSO /
+>   Keycloak (OIDC) üzerinden yapılır, `bcrypt`/`password_hash` yoktur;
+>   kalıcı kayıtlar OIDC token'ının stabil kimlik claim'ini (`subject`) düz
+>   metin olarak tutar (bkz. kök `README.md` → "Authentication Architecture").
+> - `action_plans` tablosu tamamen kaldırıldı (migration `c9e2a4f6b8d0`).
+> - `contribution_works`, `contribution_work_foremen`, `contribution_work_plants`,
+>   `contribution_gains`, `anomalies`, `anomaly_analyses`, `anomaly_tool_calls`,
+>   `foreman_monthly_reports` gibi tablolar bu dokümanın yazıldığı tarihte
+>   henüz yoktu.
+>
+> Güncel şema için `tier2/03-data-schema.md` (tablo grupları + eksiksiz
+> migration geçmişi) veya kök `README.md`'nin "Veritabanı Şeması" bölümüne
+> bakın; ya da `app/models/*.py` + `backend/alembic/versions/`'ı doğrudan
+> inceleyin. Bu doküman yeniden yazılmamıştır (kapsam dışı); yalnızca §3.1
+> KPI listesi, somut ve sık başvurulan bir yanlışı önlemek için aşağıda
+> güncellenmiştir.
+
 ---
 
 ## 1. Organizasyon
@@ -143,7 +167,18 @@ SCD2 desenli (start/end_date ile geçmişi koruyan) yerleşim geçmişi tablosu.
 
 **Referans veren:** `action_plans.kpi_id`, `kpi_calculation_rules.kpi_id`, `kpi_targets.kpi_id`, `performance_records.kpi_id`
 
-**Şu an DB'de kayıtlı 6 KPI:** `AGIR_GITME`(w=20), `GSF`(w=15), `ISKARTA`(w=25), `PLANLI_INKITA`(w=5), `PLANSIZ_INKITA`(w=15), `PLANA_UYUM`(w=20).
+**Current (canlı DB'de doğrulandı, `SELECT code, weight FROM kpis`):** 5 KPI,
+her biri ağırlık 20 (toplam 100) — `AGIR_GITME`, `GSF`, `ISKARTA`, `INKITA`,
+`PLANA_UYUM`. Kaynak: `backend/app/services/synthetic/reference_data.py::DEFAULT_KPI_SEED`.
+Hepsi `calculation_type=CUSTOM_FORMULA`; ayrıntılı formüller için kök
+`README.md` → "KPI Hesaplama Motoru" bölümüne bakın.
+
+**Legacy/history:** Bu dokümanın önceki sürümü, `PLANLI_INKITA`(w=5) /
+`PLANSIZ_INKITA`(w=15) ikilisinin ayrı KPI olduğu ve `ISKARTA`(w=25) /
+`GSF`(w=15) ağırlıklarının farklı olduğu daha eski bir seed setini
+listeliyordu. O set kodda artık mevcut değil — `INKITA` tek bir KPI'a
+birleşti (yalnızca Teknik + İmalat duruşu, Diğer duruşlar hariç), ağırlıklar
+eşitlendi (5×20).
 
 ### 3.2 `kpi_calculation_rules`
 

@@ -1,7 +1,7 @@
 import uuid
 from datetime import date
 
-from sqlalchemy import JSON, Boolean, Date, Enum, ForeignKey, Integer, Numeric, String
+from sqlalchemy import JSON, Boolean, CheckConstraint, Date, Enum, ForeignKey, Integer, Numeric, String
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
@@ -43,6 +43,9 @@ class Kpi(TimestampMixin, Base):
 class KpiCalculationRule(TimestampMixin, Base):
 
     __tablename__ = "kpi_calculation_rules"
+    __table_args__ = (
+        CheckConstraint("valid_to IS NULL OR valid_to >= valid_from", name="ck_kpi_calculation_rules_date_range"),
+    )
 
     id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     kpi_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("kpis.id"), nullable=False, index=True)
@@ -59,6 +62,9 @@ class KpiCalculationRule(TimestampMixin, Base):
 class KpiTarget(TimestampMixin, Base):
 
     __tablename__ = "kpi_targets"
+    __table_args__ = (
+        CheckConstraint("valid_to IS NULL OR valid_to >= valid_from", name="ck_kpi_targets_date_range"),
+    )
 
     id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     kpi_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("kpis.id"), nullable=False, index=True)

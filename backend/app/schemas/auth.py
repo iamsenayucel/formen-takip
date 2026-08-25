@@ -1,26 +1,31 @@
-from pydantic import BaseModel, EmailStr
+from typing import Any
+
+from pydantic import BaseModel
+
+from app.schemas.base import CamelModel
 
 
-class LoginRequest(BaseModel):
-    email: EmailStr
-    password: str
+class AuthMeResponse(CamelModel):
+    subject: str
+    display_name: str | None
+    email: str | None
 
 
-class TokenResponse(BaseModel):
-    access_token: str
-    refresh_token: str
-    token_type: str = "bearer"
+class Identity(BaseModel):
+    """Doğrulanmış OIDC access token'ından türetilen çalışma zamanı kimliği.
 
+    `subject`, uygulama veritabanındaki tüm created_by/requested_by ilişkilendirmelerinde
+    kullanılan tek stabil alandır. `claims` yalnızca çalışma zamanında (ör. arayüzde ad/e-posta
+    göstermek için) kullanılır ve hiçbir yerde kalıcı olarak saklanmaz.
+    """
 
-class RefreshRequest(BaseModel):
-    refresh_token: str
+    subject: str
+    claims: dict[str, Any]
 
+    @property
+    def display_name(self) -> str | None:
+        return self.claims.get("name") or self.claims.get("preferred_username")
 
-class UserResponse(BaseModel):
-    id: str
-    email: str
-    full_name: str
-    title: str | None = None
-    last_login_at: str | None = None
-
-    model_config = {"from_attributes": True}
+    @property
+    def email(self) -> str | None:
+        return self.claims.get("email")

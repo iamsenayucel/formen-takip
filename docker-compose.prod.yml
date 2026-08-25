@@ -1,0 +1,41 @@
+# Production overlay'i docker-compose.dev.yml ile birlikte kullanmayın.
+#
+# Tek sunucu ve aynı host DB:
+#   docker compose -f docker-compose.yml -f docker-compose.db.yml -f docker-compose.prod.yml up -d
+#
+# Harici veya ayrı host DB:
+#   docker compose -f docker-compose.yml -f docker-compose.prod.yml up -d
+#   (.env içindeki DATABASE_URL harici DB'yi göstermelidir.)
+#
+# Frontend ve backend ayrı host'lardaysa yalnız ilgili servisi başlatın:
+#   docker compose -f docker-compose.yml -f docker-compose.prod.yml up -d backend
+services:
+  backend:
+    restart: unless-stopped
+
+  frontend:
+    restart: unless-stopped
+
+  # Scheduler profile ile açılır; başladıktan sonra crash/reboot sonrası yeniden kalkmalıdır.
+  scheduler:
+    restart: unless-stopped
+
+  # Public erişime yalnız edge açılır; Caddy HTTPS'i sonlandırıp frontend'e yönlendirir.
+  edge:
+    image: caddy:2-alpine
+    restart: unless-stopped
+    environment:
+      SITE_DOMAIN: ${SITE_DOMAIN:?SITE_DOMAIN gerekli — örn. formen.example.com (bkz. README Network / Firewall). Gerçek domain yoksa (test için) SITE_DOMAIN=localhost kullanın.}
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+      - caddy_config:/config
+    depends_on:
+      - frontend
+
+volumes:
+  caddy_data:
+  caddy_config:

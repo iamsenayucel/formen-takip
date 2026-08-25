@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
-import { ChevronLeft, ShieldAlert } from "lucide-react";
+import { ShieldAlert } from "lucide-react";
+import { BackLink } from "../components/BackLink";
 import {
   useAnalysisToolCalls,
   useAnalyzeAnomaly,
@@ -16,8 +17,6 @@ import { DetectionReasonCards } from "../components/anomaly/DetectionReasonCards
 import { BenchmarkComparison } from "../components/anomaly/BenchmarkComparison";
 import { DetectionScope } from "../components/anomaly/DetectionScope";
 import { ForemanContext } from "../components/anomaly/ForemanContext";
-import { KpiBreakdownCard } from "../components/anomaly/KpiBreakdownCard";
-import { BaselineComparisonCard } from "../components/anomaly/BaselineComparisonCard";
 import { RelatedKpiChanges } from "../components/anomaly/RelatedKpiChanges";
 import { ImpactAnalysis } from "../components/anomaly/ImpactAnalysis";
 import { HistoricalDetections } from "../components/anomaly/HistoricalDetections";
@@ -32,8 +31,8 @@ export function AnomalyDetailPage() {
   const analyzeMutation = useAnalyzeAnomaly();
   const reanalyzeMutation = useReanalyzeAnomaly();
   const statusMutation = useUpdateAnomalyStatus();
-  const latestAnalysisId = anomaly.data?.latest_analysis?.id;
-  const isToolCallingMode = anomaly.data?.latest_analysis?.mode === "tool_calling";
+  const latestAnalysisId = anomaly.data?.latestAnalysis?.id;
+  const isToolCallingMode = anomaly.data?.latestAnalysis?.mode === "tool_calling";
   const toolCalls = useAnalysisToolCalls(isToolCallingMode ? latestAnalysisId : undefined);
   const [actionError, setActionError] = useState<string | null>(null);
   const [selectedMode, setSelectedMode] = useState<AnalysisMode>("single_context");
@@ -51,32 +50,29 @@ export function AnomalyDetailPage() {
     setActionError(null);
     const mutation = endpoint === "analyze" ? analyzeMutation : reanalyzeMutation;
     mutation.mutate(
-      { id: a.id, mode: selectedMode, force_refresh: true },
+      { id: a.id, mode: selectedMode, forceRefresh: true },
       { onError: () => setActionError("Yapay zekâ analizi oluşturulamadı. Daha sonra yeniden deneyebilirsiniz.") }
     );
   };
 
   return (
     <div className="flex flex-col gap-4">
-      <button
-        onClick={() => navigate("/anomalies")}
-        className="flex w-fit items-center gap-1 text-xs font-medium hover:underline"
-        style={{ color: "var(--accent)" }}
-      >
-        <ChevronLeft size={13} strokeWidth={2} />
-        Tespitler
-      </button>
+      <BackLink label="Tespitler" onClick={() => navigate("/anomalies")} />
 
+      {/* 1-2: Tespit Özeti + Ana KPI Sonucu */}
       <DetectionHero
         anomaly={a}
         statusPending={statusMutation.isPending}
         onStatusChange={(status: AnomalyStatus) => statusMutation.mutate({ id: a.id, status })}
       />
 
-      {a.data_quality_warnings.length > 0 && (
-        <div className="flex flex-col gap-1 rounded-lg p-3" style={{ background: "#fef3c722", border: "1px solid #b4530933" }}>
-          {a.data_quality_warnings.map((w) => (
-            <span key={w} className="flex items-center gap-1.5 text-xs" style={{ color: "#b45309" }}>
+      {a.dataQualityWarnings.length > 0 && (
+        <div
+          className="flex flex-col gap-1 rounded-lg p-3"
+          style={{ background: "var(--status-neutral-bg)", border: "1px solid var(--status-neutral-border)" }}
+        >
+          {a.dataQualityWarnings.map((w) => (
+            <span key={w} className="text-metadata flex items-center gap-1.5" style={{ color: "var(--status-neutral)" }}>
               <ShieldAlert size={12} strokeWidth={2} />
               {w}
             </span>
@@ -84,61 +80,66 @@ export function AnomalyDetailPage() {
         </div>
       )}
 
-      <Card title="Neden Bu Tespit Oluştu?">
-        <DetectionReasonCards anomaly={a} investigation={investigation.data} />
+      {/* 3: Tespit Neden Oluştu? */}
+      <Card title="Tespit Neden Oluşturuldu?">
+        <DetectionReasonCards anomaly={a} investigation={investigation.data} investigationLoading={investigation.isLoading} />
       </Card>
 
+      {/* 4: KPI Trendi */}
       <Card title="KPI Trendi">
         <KpiTrendInvestigationChart
-          points={a.daily_history}
-          expectedValue={a.expected_value}
-          desiredDirection={a.kpi_definition.desired_direction}
-          baselineAvg={investigation.data?.baseline_comparison.available ? investigation.data.baseline_comparison.baseline_avg : null}
+          points={a.dailyHistory}
+          targetValue={a.targetValue}
+          desiredDirection={a.kpiDefinition.desiredDirection}
+          unit={a.unit}
         />
       </Card>
 
-      <Card title="Neye Göre Anormal? — Karşılaştırma">
-        <BenchmarkComparison anomaly={a} />
+      {/* 5: Karşılaştırma */}
+      <Card title="Karşılaştırma">
+        {investigation.isLoading && <LoadingState label="Karşılaştırma yükleniyor..." />}
+        {investigation.isError && <ErrorState message="Karşılaştırma verisi yüklenemedi." />}
+        {investigation.data && <BenchmarkComparison anomaly={a} investigation={investigation.data} />}
       </Card>
 
-      <Card title="Sorunun Kapsamı">
-        <DetectionScope anomaly={a} investigation={investigation.data} />
+      {/* 6: Kapsam ve Sorumluluk */}
+      <Card title="Kapsam ve Sorumluluk">
+        <div className="flex flex-col gap-5">
+          <DetectionScope anomaly={a} />
+          <div style={{ borderTop: "1px solid var(--border)" }} />
+          {investigation.isLoading && <LoadingState label="Formen bilgisi yükleniyor..." />}
+          {investigation.isError && <ErrorState message="Formen bilgisi yüklenemedi." />}
+          {investigation.data && <ForemanContext anomaly={a} foreman={investigation.data.responsibleForeman} />}
+        </div>
       </Card>
 
-      <Card title="Sorumlu Formen">
-        {investigation.isLoading && <LoadingState label="Yükleniyor..." />}
-        {investigation.isError && <ErrorState message="Formen bilgisi yüklenemedi." />}
-        {investigation.data && <ForemanContext anomaly={a} foreman={investigation.data.responsible_foreman} />}
-      </Card>
-
-      {investigation.data?.downtime_breakdown && (
-        <Card title={`${a.kpi_name} Dağılımı`}>
-          <KpiBreakdownCard breakdown={investigation.data.downtime_breakdown} />
+      {/* 8: İlgili Diğer Sinyaller (yalnızca anlamlı sinyal varsa) */}
+      {investigation.data && investigation.data.relatedKpiChanges.length > 0 && (
+        <Card title="Aynı Dönemde Dikkat Çeken Diğer Değişimler">
+          <RelatedKpiChanges items={investigation.data.relatedKpiChanges} />
         </Card>
       )}
 
-      <Card title="Öncesi / Anomali Dönemi Karşılaştırması">
-        {investigation.isLoading && <LoadingState label="Yükleniyor..." />}
-        {investigation.isError && <ErrorState message="Karşılaştırma verisi yüklenemedi." />}
-        {investigation.data && <BaselineComparisonCard anomaly={a} investigation={investigation.data} />}
-      </Card>
-
-      <Card title="Aynı Dönemde Değişen KPI'lar">
-        {investigation.isLoading && <LoadingState label="Yükleniyor..." />}
-        {investigation.isError && <ErrorState message="İlişkili KPI verisi yüklenemedi." />}
-        {investigation.data && <RelatedKpiChanges items={investigation.data.related_kpi_changes} />}
-      </Card>
-
+      {/* 9: Operasyonel Etki */}
       <Card title="Operasyonel Etki">
         {investigation.isLoading && <LoadingState label="Yükleniyor..." />}
         {investigation.isError && <ErrorState message="Etki verisi yüklenemedi." />}
-        {investigation.data && <ImpactAnalysis impact={investigation.data.impact} />}
+        {investigation.data && (
+          <ImpactAnalysis
+            impact={investigation.data.impact}
+            downtimeBreakdown={investigation.data.downtimeBreakdown}
+            kpiName={a.kpiName}
+          />
+        )}
       </Card>
 
+      {/* 10: Benzer Geçmiş Tespitler */}
       <Card title="Benzer Geçmiş Tespitler">
         {investigation.isLoading && <LoadingState label="Yükleniyor..." />}
         {investigation.isError && <ErrorState message="Benzer tespitler yüklenemedi." />}
-        {investigation.data && <HistoricalDetections cases={investigation.data.similar_cases} />}
+        {investigation.data && (
+          <HistoricalDetections cases={investigation.data.similarCases} plantId={a.plantId} kpiId={a.kpiId} />
+        )}
       </Card>
 
       <AIInvestigationPanel

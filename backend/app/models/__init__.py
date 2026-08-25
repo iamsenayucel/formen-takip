@@ -1,5 +1,5 @@
 from app.models.anomaly import Anomaly, AnomalyAnalysis, AnomalyToolCall
-from app.models.contribution import ContributionGain, ContributionWork, ContributionWorkForeman
+from app.models.contribution import ContributionGain, ContributionWork, ContributionWorkForeman, ContributionWorkPlant
 from app.models.enums import (
     AggregationMethod,
     AnalysisMode,
@@ -19,13 +19,15 @@ from app.models.enums import (
     IntegrationStatus,
     OtherGainType,
     RepeatPeriod,
+    ReportEmailStatus,
     ReportFormat,
+    ReportGenerationStatus,
     ReportStatus,
+    ReportStorageProvider,
     ReportType,
     SourceSystem,
     TargetScopeType,
     TimeUnit,
-    VerifyingDepartment,
 )
 from app.models.foreman import Chief, Foreman, ForemanAssignment
 from app.models.foreman_report import ForemanMonthlyReport
@@ -41,7 +43,7 @@ from app.models.production import (
     ProductionRecord,
 )
 from app.models.report import ReportExport
-from app.models.user import AuditLog, User
+from app.models.user import AuditLog
 
 __all__ = [
     "AggregationMethod",
@@ -51,6 +53,9 @@ __all__ = [
     "ReportFormat",
     "ReportStatus",
     "ReportType",
+    "ReportStorageProvider",
+    "ReportGenerationStatus",
+    "ReportEmailStatus",
     "SourceSystem",
     "TargetScopeType",
     "Chief",
@@ -75,9 +80,9 @@ __all__ = [
     "ProductionRecord",
     "ReportExport",
     "AuditLog",
-    "User",
     "ContributionWork",
     "ContributionWorkForeman",
+    "ContributionWorkPlant",
     "ContributionGain",
     "ContributionStatus",
     "ContributionWorkType",
@@ -89,7 +94,6 @@ __all__ = [
     "OtherGainType",
     "RepeatPeriod",
     "TimeUnit",
-    "VerifyingDepartment",
     "Anomaly",
     "AnomalyAnalysis",
     "AnomalyToolCall",

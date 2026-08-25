@@ -1,17 +1,15 @@
-import { useState } from "react";
-import { AlertTriangle, Circle, Star, ThumbsUp, TrendingDown, Trophy, X } from "lucide-react";
+import { AlertTriangle, CheckCircle2, Circle, Star, TrendingDown, X } from "lucide-react";
 import type { DistributionItem } from "../api/types";
 import { useForemen } from "../api/hooks";
 import { LoadingState, ErrorState, EmptyState } from "./StateViews";
-import { Pagination } from "./Pagination";
-import { thClass, thStyle, theadRowStyle, tdClass, rowStyle, rowHoverClass } from "../lib/tableStyles";
+import { LoadMoreButton } from "./LoadMoreButton";
+import { thClass, thStyle, theadRowStyle, tdClass, rowStyle, rowHoverClass, tableClass } from "../lib/tableStyles";
 
-const ICONS: Record<string, typeof Trophy> = {
-  trophy: Trophy,
-  star: Star,
-  "thumbs-up": ThumbsUp,
+const ICONS: Record<string, typeof Circle> = {
+  "check-circle": CheckCircle2,
   "trending-down": TrendingDown,
   "alert-triangle": AlertTriangle,
+  star: Star,
 };
 
 type Params = Record<string, string | number | undefined>;
@@ -19,26 +17,29 @@ type Params = Record<string, string | number | undefined>;
 export function PerformanceLevelDetailModal({
   level,
   filterParams,
+  queryOverride,
   onClose,
   onNavigateForeman,
 }: {
   level: DistributionItem;
   filterParams: Params;
+  /** Formen sorgusuna eklenecek ek/alternatif parametreler (örn. `{ outstanding: "true" }`).
+   * Verilmezse varsayılan `{ level: level.name }` filtresi kullanılır. */
+  queryOverride?: Params;
   onClose: () => void;
   onNavigateForeman: (id: string) => void;
 }) {
-  const [page, setPage] = useState(1);
   const pageSize = 20;
   const Icon = ICONS[level.icon] ?? Circle;
 
   const foremen = useForemen({
     ...filterParams,
-    level: level.name,
+    ...(queryOverride ?? { level: level.name }),
     sort_by: "score",
-    sort_dir: "desc",
-    page,
-    page_size: pageSize,
-  });
+    sort_dir: level.name === "Kritik" ? "asc" : "desc",
+  }, pageSize);
+  const items = foremen.data?.pages.flatMap((page) => page.items) ?? [];
+  const total = foremen.data?.pages.at(-1)?.pagination.total;
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4" onClick={onClose}>
@@ -69,10 +70,10 @@ export function PerformanceLevelDetailModal({
 
         {foremen.isLoading && <LoadingState />}
         {foremen.isError && <ErrorState />}
-        {foremen.data && foremen.data.items.length === 0 && <EmptyState />}
-        {foremen.data && foremen.data.items.length > 0 && (
+        {foremen.data && items.length === 0 && <EmptyState />}
+        {items.length > 0 && (
           <div className="overflow-x-auto rounded-md" style={{ border: "1px solid var(--border)" }}>
-            <table className="w-full text-left text-[13px]">
+            <table className={tableClass}>
               <thead>
                 <tr style={theadRowStyle}>
                   <th className={thClass} style={thStyle}>Formen</th>
@@ -82,20 +83,25 @@ export function PerformanceLevelDetailModal({
                 </tr>
               </thead>
               <tbody>
-                {foremen.data.items.map((f) => (
+                {items.map((f) => (
                   <tr
                     key={f.id}
                     onClick={() => onNavigateForeman(f.id)}
                     className={`cursor-pointer ${rowHoverClass}`}
                     style={rowStyle}
                   >
-                    <td className={`${tdClass} font-medium`} style={{ color: "var(--text-primary)" }}>{f.full_name}</td>
-                    <td className={tdClass} style={{ color: "var(--text-muted)" }}>{f.employee_number}</td>
+                    <td className={`${tdClass} font-medium`} style={{ color: "var(--text-primary)" }}>{f.fullName}</td>
+                    <td className={tdClass} style={{ color: "var(--text-muted)" }}>{f.employeeNumber}</td>
                     <td className={tdClass} style={{ color: "var(--text-secondary)" }}>
                       {f.assignments.length ? f.assignments.map((a) => a.plant.name).join(", ") : "-"}
                     </td>
                     <td className={`${tdClass} font-medium tabular-nums`} style={{ color: level.color }}>
-                      {f.total_score.toFixed(1)}
+                      <span className="inline-flex items-center gap-1">
+                        {f.generalPerformanceScore.toFixed(1)}
+                        {f.level.outstandingPerformance && (
+                          <Star size={11} strokeWidth={2} fill="currentColor" style={{ color: "#d97706" }} aria-label="Üstün Performans" />
+                        )}
+                      </span>
                     </td>
                   </tr>
                 ))}
@@ -103,7 +109,14 @@ export function PerformanceLevelDetailModal({
             </table>
 
             <div className="px-1 pb-1">
-              <Pagination page={page} pageSize={pageSize} total={foremen.data.total} onPageChange={setPage} itemLabel="formen" />
+              <LoadMoreButton
+                hasMore={!!foremen.hasNextPage}
+                isFetchingNextPage={foremen.isFetchingNextPage}
+                onLoadMore={() => void foremen.fetchNextPage()}
+                loadedCount={items.length}
+                total={total}
+                itemLabel="formen"
+              />
             </div>
           </div>
         )}

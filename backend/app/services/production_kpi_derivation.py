@@ -11,6 +11,7 @@ from sqlalchemy.orm import Session
 from app.models.foreman import Chief, Foreman
 from app.models.organization import Plant, Shift
 from app.models.production import ForemanWorkCalendar, Product, ProductionRecord
+from app.services.kpi_engine import SHIFT_MINUTES
 from app.services.providers.base import RawPerformanceRecord
 
 
@@ -69,6 +70,10 @@ def _kpi_components(record: ProductionRecord, product: Product | None):
                 manufacturing_min = float(record.manufacturing_downtime_minutes)
                 included_min = technical_min + manufacturing_min
                 yield ("INKITA", included_min / shift_minutes * 100.0, included_min, shift_minutes)
+
+    if record.working_time_minutes is not None:
+        working_minutes = float(record.working_time_minutes)
+        yield ("OEE", working_minutes / SHIFT_MINUTES * 100.0, working_minutes, SHIFT_MINUTES)
 
 
 def derive_raw_performance_records(
@@ -140,7 +145,7 @@ def derive_raw_performance_records(
             )
             yield raw
 
-            if rng is not None and rng.random() < duplicate_rate:
+            if kpi_code != "OEE" and rng is not None and rng.random() < duplicate_rate:
                 yield RawPerformanceRecord(
                     source_record_id=f"{raw.source_record_id}-DUP",
                     performance_date=raw.performance_date,

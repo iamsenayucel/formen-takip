@@ -15,18 +15,10 @@ function initials(name: string): string {
   return name.split(" ").filter(Boolean).slice(0, 2).map((p) => p[0]?.toUpperCase()).join("");
 }
 
-function GainCard({ label, value, sub, verified }: { label: string; value: string; sub?: string; verified?: "verified" | "estimated" }) {
+function GainCard({ label, value, sub }: { label: string; value: string; sub?: string }) {
   return (
     <div className="rounded-lg p-4" style={{ background: "var(--surface)", border: "1px solid var(--border)" }}>
-      <div className="flex items-center justify-between">
-        <span className="text-[11px] font-semibold uppercase tracking-wide" style={{ color: "var(--text-muted)" }}>{label}</span>
-        {verified === "verified" && (
-          <span className="rounded-full px-1.5 py-0.5 text-[10px] font-medium" style={{ background: "rgba(21,128,61,0.1)", color: "#15803d" }}>Doğrulanmış</span>
-        )}
-        {verified === "estimated" && (
-          <span className="rounded-full px-1.5 py-0.5 text-[10px] font-medium" style={{ background: "var(--page-bg)", color: "var(--text-muted)" }}>Tahmini</span>
-        )}
-      </div>
+      <span className="text-[11px] font-semibold uppercase tracking-wide" style={{ color: "var(--text-muted)" }}>{label}</span>
       <div className="mt-1.5 text-xl font-semibold" style={{ color: "var(--text-primary)" }}>{value}</div>
       {sub && <div className="mt-1 text-xs" style={{ color: "var(--text-muted)" }}>{sub}</div>}
     </div>
@@ -50,8 +42,8 @@ export function ImprovementWorkDetailPage() {
   if (work.isError || !work.data) return <ErrorState message="Çalışma bulunamadı." />;
 
   const w = work.data;
-  const Icon = workTypeIcon(w.work_type);
-  const accent = workTypeColor(w.work_type, isDark);
+  const Icon = workTypeIcon(w.workType);
+  const accent = workTypeColor(w.workType, isDark);
 
   const handleDelete = () => {
     if (!window.confirm(`"${w.title}" çalışmasını kaldırmak istediğinize emin misiniz?`)) return;
@@ -83,11 +75,11 @@ export function ImprovementWorkDetailPage() {
         style={{ color: "var(--accent)" }}
       >
         <ChevronLeft size={13} strokeWidth={2} />
-        Katkılar
+        Operational Impact+
       </button>
 
       {justPublished && (
-        <div className="flex items-center gap-2 rounded-lg p-3 text-[13px] font-medium" style={{ background: "rgba(21,128,61,0.1)", color: "#15803d" }}>
+        <div className="flex items-center gap-2 rounded-lg p-3 text-[13px] font-medium" style={{ background: "var(--status-positive-bg)", color: "var(--status-positive)" }}>
           <CheckCircle2 size={16} strokeWidth={2} />
           Çalışma başarıyla yayımlandı.
         </div>
@@ -98,11 +90,11 @@ export function ImprovementWorkDetailPage() {
           <div className="flex items-center gap-2">
             <span className="inline-flex items-center gap-1.5 rounded px-2 py-0.5 text-[11px] font-semibold uppercase tracking-wide" style={{ backgroundColor: `${accent}14`, color: accent, border: `1px solid ${accent}33` }}>
               <Icon size={12} strokeWidth={2.25} />
-              {workTypeLabel(w.work_type)}
+              {workTypeLabel(w.workType)}
             </span>
             <span
               className="rounded px-2 py-0.5 text-[11px] font-semibold uppercase tracking-wide"
-              style={w.status === "published" ? { background: "rgba(21,128,61,0.1)", color: "#15803d" } : { background: "var(--page-bg)", color: "var(--text-muted)", border: "1px solid var(--border-strong)" }}
+              style={w.status === "published" ? { background: "var(--status-positive-bg)", color: "var(--status-positive)" } : { background: "var(--page-bg)", color: "var(--text-muted)", border: "1px solid var(--border-strong)" }}
             >
               {STATUS_LABELS[w.status]}
             </span>
@@ -138,19 +130,19 @@ export function ImprovementWorkDetailPage() {
         </div>
 
         <div className="mt-4 flex flex-wrap items-center gap-x-5 gap-y-2 text-[13px]" style={{ color: "var(--text-muted)" }}>
-          {w.plant && (
+          {w.plants.length > 0 && (
             <span className="flex items-center gap-1.5">
               <Factory size={14} strokeWidth={2} />
-              {w.plant.factory_code} · {w.plant.name}
+              {w.plants.map((p) => `${p.factoryCode} · ${p.name}`).join(", ")}
             </span>
           )}
-          {w.work_date && (
+          {w.workDate && (
             <span className="flex items-center gap-1.5">
               <CalendarDays size={14} strokeWidth={2} />
-              {w.work_date}{w.work_date_end ? ` — ${w.work_date_end}` : ""}
+              {w.workDate}{w.workDateEnd ? ` — ${w.workDateEnd}` : ""}
             </span>
           )}
-          <span>Kaydeden: {w.created_by ?? "-"}</span>
+          <span>Kaydeden: {w.createdBy ?? "-"}</span>
         </div>
 
         {w.foremen.length > 0 && (
@@ -174,57 +166,74 @@ export function ImprovementWorkDetailPage() {
           </div>
         )}
 
-        {(w.highlighted_gain || w.before_after) && (
+        {w.contributionScore !== null && (
+          <div className="mt-5 rounded-lg p-4" style={{ background: "var(--status-positive-bg)", border: "1px solid var(--status-positive-border)" }}>
+            <div className="flex items-center justify-between">
+              <span className="text-sm font-semibold" style={{ color: "var(--status-positive)" }}>
+                Operational Impact+ Puanı: {w.contributionScore}/5 — {w.contributionScoreLabel}
+              </span>
+            </div>
+            <ul className="mt-3 flex flex-col gap-1.5 text-xs" style={{ color: "var(--text-secondary)" }}>
+              {w.contributionScoreBreakdown
+                .filter((c) => c.label !== "Toplam")
+                .map((c) => (
+                  <li key={c.label} className="flex items-center justify-between gap-3">
+                    <span>{c.label} — {c.detail}</span>
+                    <span className="shrink-0 font-medium tabular-nums" style={{ color: "var(--text-primary)" }}>+{c.points}</span>
+                  </li>
+                ))}
+            </ul>
+          </div>
+        )}
+
+        {(w.highlightedGain || w.beforeAfter) && (
           <div className="mt-5 grid grid-cols-1 gap-4 md:grid-cols-2">
-            {w.highlighted_gain && (
+            {w.highlightedGain && (
               <div className="rounded-lg p-4" style={{ background: `${accent}0d`, border: `1px solid ${accent}33` }}>
                 <div className="text-xs font-semibold uppercase tracking-wide" style={{ color: "var(--text-muted)" }}>Öne Çıkan Kazanım</div>
                 <div className="mt-1 text-3xl font-bold" style={{ color: accent }}>
-                  {new Intl.NumberFormat("tr-TR", { maximumFractionDigits: 2 }).format(w.highlighted_gain.value)}
-                  {w.highlighted_gain.unit && <span className="ml-1.5 text-lg font-medium">{w.highlighted_gain.unit}</span>}
+                  {new Intl.NumberFormat("tr-TR", { maximumFractionDigits: 2 }).format(w.highlightedGain.value)}
+                  {w.highlightedGain.unit && <span className="ml-1.5 text-lg font-medium">{w.highlightedGain.unit}</span>}
                 </div>
-                <div className="mt-0.5 text-[13px]" style={{ color: "var(--text-secondary)" }}>{w.highlighted_gain.label}</div>
+                <div className="mt-0.5 text-[13px]" style={{ color: "var(--text-secondary)" }}>{w.highlightedGain.label}</div>
               </div>
             )}
-            {w.before_after && (
+            {w.beforeAfter && (
               <div className="rounded-lg p-4" style={{ border: "1px solid var(--border)" }}>
-                <BeforeAfterComparison data={w.before_after} />
+                <BeforeAfterComparison data={w.beforeAfter} />
               </div>
             )}
           </div>
         )}
       </div>
 
-      <ProblemSolutionResultFlow problem={w.problem_description} solution={w.solution_description} result={w.result_description} />
+      <ProblemSolutionResultFlow problem={w.problemDescription} solution={w.solutionDescription} result={w.resultDescription} />
 
-      {w.detailed_description && (
+      {w.detailedDescription && (
         <Card title="Detaylı Açıklama">
-          <p className="text-[13px] leading-relaxed" style={{ color: "var(--text-secondary)" }}>{w.detailed_description}</p>
+          <p className="text-[13px] leading-relaxed" style={{ color: "var(--text-secondary)" }}>{w.detailedDescription}</p>
         </Card>
       )}
 
-      {(w.financial_gain_status === "yes" || w.monthly_total_saving_minutes != null || w.gains.length > 0) && (
+      {(w.financialGainStatus === "yes" || w.monthlyTotalSavingMinutes != null || w.gains.length > 0) && (
         <div>
           <h2 className="mb-2 text-sm font-semibold" style={{ color: "var(--text-primary)" }}>Ölçülebilir Kazanımlar</h2>
           <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-3">
-            {w.estimated_amount != null && (
-              <GainCard label="Tahmini Maddi Kazanç" value={formatMoney(w.estimated_amount, w.currency)} sub={w.gain_period ?? undefined} verified="estimated" />
+            {w.gainAmount != null && (
+              <GainCard label="Maddi Kazanç" value={formatMoney(w.gainAmount, w.currency)} sub={w.gainPeriod ?? undefined} />
             )}
-            {w.verified_amount != null && (
-              <GainCard label="Doğrulanmış Maddi Kazanç" value={formatMoney(w.verified_amount, w.currency)} sub={w.verified_by_department ?? undefined} verified="verified" />
+            {w.perOccurrenceSaving != null && (
+              <GainCard label="İşlem Başına Zaman Kazancı" value={`${w.perOccurrenceSaving} ${w.durationUnit === "hour" ? "saat" : w.durationUnit === "second" ? "saniye" : "dakika"}`} />
             )}
-            {w.per_occurrence_saving != null && (
-              <GainCard label="İşlem Başına Zaman Kazancı" value={`${w.per_occurrence_saving} ${w.duration_unit === "hour" ? "saat" : w.duration_unit === "second" ? "saniye" : "dakika"}`} />
-            )}
-            {w.monthly_total_saving_minutes != null && (
-              <GainCard label="Aylık Toplam Zaman Kazancı" value={`${w.monthly_total_saving_minutes} dakika`} />
+            {w.monthlyTotalSavingMinutes != null && (
+              <GainCard label="Aylık Toplam Zaman Kazancı" value={`${w.monthlyTotalSavingMinutes} dakika`} />
             )}
             {w.gains.map((g) => (
               <GainCard
                 key={g.id}
-                label={g.gain_type_label}
-                value={g.change_percent != null ? `%${Math.abs(g.change_percent)}` : g.change_amount != null ? `${g.change_amount}` : "-"}
-                sub={g.previous_value != null && g.next_value != null ? `${g.previous_value} → ${g.next_value} ${g.unit ?? ""}` : undefined}
+                label={g.gainTypeLabel}
+                value={g.changePercent != null ? `%${Math.abs(g.changePercent)}` : g.changeAmount != null ? `${g.changeAmount}` : "-"}
+                sub={g.previousValue != null && g.nextValue != null ? `${g.previousValue} → ${g.nextValue} ${g.unit ?? ""}` : undefined}
               />
             ))}
           </div>

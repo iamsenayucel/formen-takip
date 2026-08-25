@@ -54,6 +54,16 @@ KPI_DEFINITIONS: dict[str, dict] = {
         "warning_threshold": 90.0,
         "critical_threshold": 80.0,
     },
+    "OEE": {
+        "name": "OEE",
+        "description": (
+            "Bir vardiyanın (720 dk) ya da tesis/dönem toplamının gerçekleşen çalışma süresinin, "
+            "ilgili toplam süreye oranı."
+        ),
+        "desired_direction": "high",
+        "warning_threshold": 85.0,
+        "critical_threshold": 70.0,
+    },
 }
 
 ANOMALY_TYPE_LABELS: dict[AnomalyType, str] = {
@@ -83,6 +93,13 @@ STATUS_LABELS = {
 ANALYSIS_STATUS_LABELS = {
     "not_analyzed": "Analiz Edilmedi",
     "analyzing": "Analiz Ediliyor",
+    "queued": "Sırada",
+    "planning": "Analiz Planlanıyor",
+    "collecting_data": "Veriler Toplanıyor",
+    "generating_analysis": "Sonuç Hazırlanıyor",
     "completed": "Analiz Tamamlandı",
+    "completed_with_warnings": "Uyarılarla Tamamlandı",
     "failed": "Analiz Başarısız",
+    "timed_out": "Zaman Aşımına Uğradı",
+    "cancelled": "İptal Edildi",
 }

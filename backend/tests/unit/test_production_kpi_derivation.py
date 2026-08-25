@@ -18,6 +18,7 @@ def _record(**overrides):
         technical_downtime_minutes=15.0,
         manufacturing_downtime_minutes=10.0,
         other_downtime_minutes=25.0,
+        working_time_minutes=None,
     )
     base.update(overrides)
     return SimpleNamespace(**base)
@@ -163,6 +164,37 @@ class TestPlanaUyum:
     def test_skipped_when_actual_qty_missing(self):
         result = _by_code(_kpi_components(_record(actual_qty=None), _product()))
         assert "PLANA_UYUM" not in result
+
+
+class TestOee:
+
+    def test_skipped_when_working_time_not_set(self):
+        result = _by_code(_kpi_components(_record(), _product()))
+        assert "OEE" not in result
+
+    def test_full_shift_yields_100_percent(self):
+        result = _by_code(_kpi_components(_record(working_time_minutes=720.0), _product()))
+        assert result["OEE"] == (100.0, 720.0, 720.0)
+
+    def test_partial_shift_yields_recomputed_percent(self):
+        result = _by_code(_kpi_components(_record(working_time_minutes=660.0), _product()))
+        actual, numerator, denominator = result["OEE"]
+        assert actual == pytest.approx(91.6667, abs=1e-3)
+        assert numerator == pytest.approx(660.0)
+        assert denominator == pytest.approx(720.0)
+
+    def test_zero_working_time_yields_zero_not_skip(self):
+        result = _by_code(_kpi_components(_record(working_time_minutes=0.0), _product()))
+        assert result["OEE"] == (0.0, 0.0, 720.0)
+
+    def test_independent_of_product_and_quantities(self):
+        result = _by_code(
+            _kpi_components(
+                _record(working_time_minutes=360.0, actual_qty=None, planned_qty=None, gsf_qty=None, iskarta_qty=None),
+                None,
+            )
+        )
+        assert result["OEE"] == (50.0, 360.0, 720.0)
 
 
 class TestNoDataFabrication:

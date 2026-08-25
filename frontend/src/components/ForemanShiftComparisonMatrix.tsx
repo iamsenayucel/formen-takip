@@ -7,11 +7,8 @@ import { PerformanceLevelBadge } from "./PerformanceLevelBadge";
 import { withSearchParam } from "../lib/chartDrilldown";
 import { fieldClass, fieldStyle, labelClass, labelStyle } from "../lib/formStyles";
 import { rowStyle, tdClass, thClass, theadRowStyle, thStyle } from "../lib/tableStyles";
+import { formatKpiUnitValue } from "../lib/kpiFormat";
 import type { ForemanShiftMatrixCell } from "../api/types";
-
-function decimalPlacesFor(unit: string): number {
-  return unit === "%" ? 1 : 2;
-}
 
 function MatrixCell({ cell, unit }: { cell: ForemanShiftMatrixCell | null; unit: string }) {
   if (!cell) {
@@ -24,20 +21,17 @@ function MatrixCell({ cell, unit }: { cell: ForemanShiftMatrixCell | null; unit:
       </div>
     );
   }
-  const decimals = decimalPlacesFor(unit);
   return (
     <div
       className="rounded-md p-3"
       style={{ background: "var(--page-bg)", border: "1px solid var(--border)", borderTop: `2px solid ${cell.level.color}` }}
     >
       <p className="text-lg font-semibold tabular-nums" style={{ color: "var(--text-primary)" }}>
-        {cell.avg_actual.toFixed(decimals)} <span className="text-xs font-normal" style={{ color: "var(--text-muted)" }}>{unit}</span>
+        {formatKpiUnitValue(cell.avgActual, unit)}
       </p>
-      {cell.deviation_pct !== null && (
-        <p className="mt-0.5 text-[11px] tabular-nums" style={{ color: "var(--text-muted)" }}>
-          Hedefe göre {cell.deviation_pct >= 0 ? "+" : ""}%{cell.deviation_pct.toFixed(1)}
-        </p>
-      )}
+      <p className="mt-0.5 text-[11px] font-medium tabular-nums" style={{ color: "var(--text-secondary)" }}>
+        Hedef: {formatKpiUnitValue(cell.avgTarget, unit)}
+      </p>
       <div className="mt-1.5"><PerformanceLevelBadge level={cell.level} /></div>
     </div>
   );
@@ -63,7 +57,7 @@ export function ForemanShiftComparisonMatrix({
       setSelectedKpiId(focusKpiId);
       return;
     }
-    const first = kpis.data?.items[0];
+    const first = kpis.data?.[0];
     if (first) setSelectedKpiId(first.id);
   }, [focusKpiId, kpis.data, selectedKpiId]);
 
@@ -85,7 +79,7 @@ export function ForemanShiftComparisonMatrix({
             onChange={(e) => setSelectedKpiId(e.target.value)}
             disabled={kpis.isLoading}
           >
-            {(kpis.data?.items ?? []).map((k) => (
+            {(kpis.data ?? []).map((k) => (
               <option key={k.id} value={k.id}>{k.name}</option>
             ))}
           </select>
@@ -111,10 +105,10 @@ export function ForemanShiftComparisonMatrix({
               </thead>
               <tbody>
                 {matrix.data.rows.map((row) => (
-                  <tr key={row.foreman_id} style={rowStyle}>
+                  <tr key={row.foremanId} style={rowStyle}>
                     <td className={`${tdClass} align-top font-medium`} style={{ color: "var(--text-primary)" }}>
-                      {row.full_name}
-                      <span className="mt-0.5 block text-xs font-normal" style={{ color: "var(--text-muted)" }}>{row.employee_number}</span>
+                      {row.fullName}
+                      <span className="mt-0.5 block text-xs font-normal" style={{ color: "var(--text-muted)" }}>{row.employeeNumber}</span>
                     </td>
                     {matrix.data!.shifts.map((s) => (
                       <td key={s.id} className="py-2 pr-4 align-top">
@@ -138,13 +132,13 @@ export function ForemanShiftComparisonMatrix({
           <div className="mt-3 flex flex-wrap gap-2">
             {matrix.data.rows.map((row) => (
               <button
-                key={row.foreman_id}
+                key={row.foremanId}
                 type="button"
-                onClick={() => navigate(`/foremen/${row.foreman_id}`)}
+                onClick={() => navigate(`/foremen/${row.foremanId}`)}
                 className="inline-flex items-center gap-1 rounded-md px-2.5 py-1.5 text-xs font-medium hover:bg-[var(--page-bg)]"
                 style={{ border: "1px solid var(--border)", color: "var(--accent)" }}
               >
-                {row.full_name} Profiline Git
+                {row.fullName} Profiline Git
                 <ArrowRight size={12} strokeWidth={2} />
               </button>
             ))}

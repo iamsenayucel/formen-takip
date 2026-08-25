@@ -26,7 +26,7 @@ from app.models.kpi import Kpi
 from app.models.organization import Factory, Plant, Shift
 from app.models.performance import PerformanceRecord
 from app.schemas.common import Filters
-from app.services import analytics
+from app.services import analytics, contribution_bonus
 from app.services.kpi_engine import resolve_performance_level
 from app.services.level_lookup import get_performance_levels
 
@@ -158,14 +158,22 @@ def _shift_comparison(db: Session, filters: Filters):
 
 def _foreman_performance(db: Session, filters: Filters, only_critical: bool = False):
     scores = analytics.foreman_scores(db, filters)
+    bonuses = contribution_bonus.foreman_contribution_bonuses(db, filters.date_to, foreman_ids=[s.key for s in scores])
+    general_by_key = {
+        s.key: contribution_bonus.general_performance_score(
+            s.total_score, bonuses[s.key].bonus if s.key in bonuses else 0
+        )
+        for s in scores
+    }
     foremen = {f.id: f for f in db.scalars(select(Foreman))}
     plant_by_foreman = _current_plant_by_foreman(db)
     levels = get_performance_levels(db)
 
-    headers = ["Sicil No", "Ad Soyad", "Tesis", "Toplam Puan", "Seviye", "Güvenilir"]
+    headers = ["Sicil No", "Ad Soyad", "Tesis", "Operasyonel Puan", "Operational Impact+ Bonusu", "Genel Puan", "Seviye", "Güvenilir"]
     rows = []
-    for s in sorted(scores, key=lambda x: x.total_score):
-        level = resolve_performance_level(s.total_score, levels)
+    for s in sorted(scores, key=lambda x: general_by_key[x.key]):
+        general_score = general_by_key[s.key]
+        level = resolve_performance_level(general_score, levels)
         if only_critical and level.name != "Kritik":
             continue
         f = foremen.get(s.key)
@@ -174,13 +182,15 @@ def _foreman_performance(db: Session, filters: Filters, only_critical: bool = Fa
                 "Sicil No": f.employee_number if f else "-",
                 "Ad Soyad": f"{f.first_name} {f.last_name}" if f else "-",
                 "Tesis": plant_by_foreman.get(s.key) or "-",
-                "Toplam Puan": round(s.total_score, 2),
+                "Operasyonel Puan": round(s.total_score, 2),
+                "Operational Impact+ Bonusu": bonuses[s.key].bonus if s.key in bonuses else 0,
+                "Genel Puan": round(general_score, 2),
                 "Seviye": level.name,
                 "Güvenilir": "Evet" if s.is_reliable else "Hayır",
             }
         )
     if not only_critical:
-        rows.sort(key=lambda r: r["Toplam Puan"], reverse=True)
+        rows.sort(key=lambda r: r["Genel Puan"], reverse=True)
     return headers, rows
 
 
@@ -204,12 +214,16 @@ def _kpi_analysis(db: Session, filters: Filters):
 
 def _company_summary(db: Session, filters: Filters):
     scores = analytics.foreman_scores(db, filters)
+    bonuses = contribution_bonus.foreman_contribution_bonuses(db, filters.date_to, foreman_ids=[s.key for s in scores])
     levels = get_performance_levels(db)
     headers = ["Performans Seviyesi", "Formen Sayısı", "Ortalama Puan"]
     buckets: dict[str, list[float]] = {lv.name: [] for lv in levels}
     for s in scores:
-        level = resolve_performance_level(s.total_score, levels)
-        buckets[level.name].append(s.total_score)
+        general_score = contribution_bonus.general_performance_score(
+            s.total_score, bonuses[s.key].bonus if s.key in bonuses else 0
+        )
+        level = resolve_performance_level(general_score, levels)
+        buckets[level.name].append(general_score)
     rows = [
         {
             "Performans Seviyesi": lv.name,

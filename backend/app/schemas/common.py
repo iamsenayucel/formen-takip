@@ -4,6 +4,8 @@ from uuid import UUID
 
 from fastapi import Query
 
+from app.core import clock
+
 
 @dataclass
 class Filters:
@@ -33,7 +35,7 @@ def common_filters(
     kpi_ids: str | None = Query(None, description="Virgülle ayrılmış KPI ID listesi"),
     foreman_ids: str | None = Query(None, description="Virgülle ayrılmış formen ID listesi"),
 ) -> Filters:
-    resolved_to = date_to or date.today()
+    resolved_to = date_to or clock.today_local()
     resolved_from = date_from or (resolved_to - timedelta(days=30))
     if resolved_from > resolved_to:
         resolved_from, resolved_to = resolved_to, resolved_from
@@ -50,13 +52,13 @@ def common_filters(
 
 
 @dataclass
-class PageParams:
-    page: int = 1
-    page_size: int = 25
+class CursorParams:
+    cursor: str | None = None
+    limit: int = 25
 
 
-def page_params(
-    page: int = Query(1, ge=1),
-    page_size: int = Query(25, ge=1, le=200),
-) -> PageParams:
-    return PageParams(page=page, page_size=page_size)
+def cursor_params(
+    cursor: str | None = Query(None),
+    limit: int = Query(25, ge=1, le=200),
+) -> CursorParams:
+    return CursorParams(cursor=cursor, limit=limit)

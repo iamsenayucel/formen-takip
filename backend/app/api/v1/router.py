@@ -1,4 +1,4 @@
-from fastapi import APIRouter
+from fastapi import APIRouter, Depends
 
 from app.api.v1 import (
     anomalies,
@@ -13,8 +13,9 @@ from app.api.v1 import (
     reports,
     shift_analysis,
 )
+from app.core.rate_limit import rate_limit_default
 
-api_router = APIRouter(prefix="/api/v1")
+api_router = APIRouter(prefix="/api/v1", dependencies=[Depends(rate_limit_default)])
 api_router.include_router(auth.router)
 api_router.include_router(meta.router)
 api_router.include_router(dashboard.router)

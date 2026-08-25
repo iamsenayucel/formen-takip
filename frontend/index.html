@@ -16,6 +16,10 @@
   </head>
   <body>
     <div id="root"></div>
+    <!-- Docker image'da container start'ta gerçek değerlerle üretilir (bkz.
+         docker-entrypoint.d/40-runtime-config.sh); npm run dev'de boş kalır ve
+         src/config/runtimeConfig.ts import.meta.env.VITE_*'a düşer. -->
+    <script src="/config.js"></script>
     <script type="module" src="/src/main.tsx"></script>
   </body>
 </html>

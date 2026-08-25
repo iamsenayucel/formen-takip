@@ -1,66 +1,116 @@
-from tests.integration.conftest import TEST_EMAIL, TEST_PASSWORD
+import logging
+from tests.helpers import legacy_json
+
+from app.core.config import get_settings
+
+from .conftest import TEST_SUBJECT, make_test_token
 
 
-class TestLoginFlow:
-    def test_login_success_returns_tokens(self, client):
-        resp = client.post("/api/v1/auth/login", json={"email": TEST_EMAIL, "password": TEST_PASSWORD})
-        assert resp.status_code == 200
-        body = resp.json()
-        assert "access_token" in body
-        assert "refresh_token" in body
-        assert body["token_type"] == "bearer"
-
-    def test_login_wrong_password_returns_401(self, client):
-        resp = client.post("/api/v1/auth/login", json={"email": TEST_EMAIL, "password": "yanlis-parola"})
-        assert resp.status_code == 401
-
-    def test_login_unknown_email_returns_401(self, client):
-        resp = client.post("/api/v1/auth/login", json={"email": "olmayan@formen-demo.com", "password": "x"})
+class TestNoToken:
+    def test_protected_endpoint_without_authorization_header_returns_401(self, client):
+        resp = client.get("/api/v1/dashboard/summary")
         assert resp.status_code == 401
 
     def test_me_requires_authentication(self, client):
         resp = client.get("/api/v1/auth/me")
         assert resp.status_code == 401
 
-    def test_me_returns_current_user(self, client, auth_headers):
+
+class TestValidToken:
+    def test_valid_token_is_accepted(self, client, auth_headers):
         resp = client.get("/api/v1/auth/me", headers=auth_headers)
         assert resp.status_code == 200
-        assert resp.json()["email"] == TEST_EMAIL
 
-    def test_protected_dashboard_requires_authentication(self, client):
-        resp = client.get("/api/v1/dashboard/summary")
+    def test_valid_token_grants_access_to_protected_endpoint(self, client, auth_headers):
+        resp = client.get("/api/v1/dashboard/summary", headers=auth_headers)
+        assert resp.status_code == 200
+
+
+class TestExpiredToken:
+    def test_expired_token_returns_401(self, client):
+        token = make_test_token(expires_in=-60)
+        resp = client.get("/api/v1/auth/me", headers={"Authorization": f"Bearer {token}"})
         assert resp.status_code == 401
 
-    def test_refresh_returns_new_access_token(self, client):
-        login = client.post("/api/v1/auth/login", json={"email": TEST_EMAIL, "password": TEST_PASSWORD})
-        refresh_token = login.json()["refresh_token"]
-        resp = client.post("/api/v1/auth/refresh", json={"refresh_token": refresh_token})
+
+class TestInvalidSignature:
+    def test_token_signed_with_wrong_key_returns_401(self, client):
+        from cryptography.hazmat.primitives import serialization
+        from cryptography.hazmat.primitives.asymmetric import rsa
+
+        rogue_key = rsa.generate_private_key(public_exponent=65537, key_size=2048)
+        rogue_pem = rogue_key.private_bytes(
+            encoding=serialization.Encoding.PEM,
+            format=serialization.PrivateFormat.PKCS8,
+            encryption_algorithm=serialization.NoEncryption(),
+        )
+        token = make_test_token(signing_key=rogue_pem)
+        resp = client.get("/api/v1/auth/me", headers={"Authorization": f"Bearer {token}"})
+        assert resp.status_code == 401
+
+    def test_tampered_token_returns_401(self, client, auth_headers):
+        # Son 1-2 base64url karakteri, dolgu (padding) bitleri yüzünden değiştirmeden
+        # aynı imza baytlarına decode olabilir; ortadaki bir karakteri bozmak imzayı
+        # güvenilir şekilde geçersiz kılar.
+        original = auth_headers["Authorization"]
+        mid = len(original) // 2
+        flipped = "A" if original[mid] != "A" else "B"
+        tampered = original[:mid] + flipped + original[mid + 1 :]
+        resp = client.get("/api/v1/auth/me", headers={"Authorization": tampered})
+        assert resp.status_code == 401
+
+
+class TestWrongIssuer:
+    def test_wrong_issuer_returns_401(self, client):
+        token = make_test_token(issuer="https://not-our-sso.example.com/realms/other")
+        resp = client.get("/api/v1/auth/me", headers={"Authorization": f"Bearer {token}"})
+        assert resp.status_code == 401
+
+
+class TestWrongAudience:
+    def test_wrong_audience_returns_401(self, client):
+        token = make_test_token(audience="some-other-service")
+        resp = client.get("/api/v1/auth/me", headers={"Authorization": f"Bearer {token}"})
+        assert resp.status_code == 401
+
+
+class TestMalformedHeader:
+    def test_malformed_authorization_header_returns_401(self, client):
+        resp = client.get("/api/v1/auth/me", headers={"Authorization": "not-a-bearer-token"})
+        assert resp.status_code == 401
+
+    def test_garbage_bearer_token_returns_401(self, client):
+        resp = client.get("/api/v1/auth/me", headers={"Authorization": "Bearer not.a.jwt"})
+        assert resp.status_code == 401
+
+    def test_missing_bearer_prefix_returns_401(self, client):
+        token = make_test_token()
+        resp = client.get("/api/v1/auth/me", headers={"Authorization": token})
+        assert resp.status_code == 401
+
+
+class TestIdentityExtraction:
+    def test_subject_is_extracted_from_verified_token(self, client, auth_headers):
+        resp = client.get("/api/v1/auth/me", headers=auth_headers)
         assert resp.status_code == 200
-        assert "access_token" in resp.json()
+        body = legacy_json(resp)
+        assert body["subject"] == TEST_SUBJECT
+        assert body["email"] == f"{TEST_SUBJECT}@formen-demo.com"
 
-    def test_account_locks_after_repeated_failures(self, client):
-        email = "lockout.test@formen-demo.com"
-        from app.core.security import hash_password
-        from app.db.session import SessionLocal
-        from app.models.user import User
+    def test_configurable_user_id_claim_is_used(self, client, monkeypatch):
+        settings = get_settings()
+        monkeypatch.setattr(settings, "oidc_user_id_claim", "employee_id")
+        token = make_test_token(extra_claims={"employee_id": "EMP-4242"})
+        resp = client.get("/api/v1/auth/me", headers={"Authorization": f"Bearer {token}"})
+        assert resp.status_code == 200
+        assert legacy_json(resp)["subject"] == "EMP-4242"
 
-        from app.models.user import AuditLog
 
-        db = SessionLocal()
-        try:
-            existing = db.query(User).filter(User.email == email).first()
-            if existing:
-                db.query(AuditLog).filter(AuditLog.user_id == existing.id).delete()
-                db.delete(existing)
-                db.commit()
-            db.add(User(email=email, password_hash=hash_password("CorrectPass!1"), full_name="Kilit Testi", is_active=True))
-            db.commit()
-        finally:
-            db.close()
-
-        for _ in range(5):
-            resp = client.post("/api/v1/auth/login", json={"email": email, "password": "wrong"})
-            assert resp.status_code == 401
-
-        resp = client.post("/api/v1/auth/login", json={"email": email, "password": "CorrectPass!1"})
-        assert resp.status_code == 423
+class TestTokenNotLogged:
+    def test_token_never_appears_in_logs_even_on_failure(self, client, caplog):
+        token = make_test_token(expires_in=-60)
+        with caplog.at_level(logging.DEBUG):
+            resp = client.get("/api/v1/auth/me", headers={"Authorization": f"Bearer {token}"})
+        assert resp.status_code == 401
+        for record in caplog.records:
+            assert token not in record.getMessage()

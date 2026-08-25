@@ -1,0 +1,63 @@
+# Local development overlay'i otomatik birleşmez; komutta açıkça verin:
+#   docker compose -f docker-compose.yml -f docker-compose.db.yml -f docker-compose.dev.yml up --build -d
+# Local Keycloak ekler ve backend/frontend'i bu servise yönlendirir.
+# Production deployment bu dosyayı kullanmaz:
+#   docker compose -f docker-compose.yml -f docker-compose.prod.yml up -d
+# Aynı host DB için docker-compose.db.yml ayrıca eklenebilir.
+#
+# Browser ve backend aynı issuer değerini görmelidir; OIDC token'ındaki `iss`
+# claim'i discovery belgesiyle eşleşir. KC_HOSTNAME issuer'ı `keycloak` adına
+# sabitler. Compose DNS backend için çözer; browser için hosts kaydı gerekir.
+services:
+  keycloak:
+    image: quay.io/keycloak/keycloak:26.7
+    command: start-dev --import-realm
+    environment:
+      KEYCLOAK_ADMIN: ${KEYCLOAK_ADMIN:-admin}
+      KEYCLOAK_ADMIN_PASSWORD: ${KEYCLOAK_ADMIN_PASSWORD:-admin}
+      KC_HTTP_ENABLED: "true"
+      KC_HTTP_PORT: "8081"
+      KC_HOSTNAME: ${OIDC_DEV_HOSTNAME:-keycloak}
+      KC_HOSTNAME_PORT: "8081"
+      KC_HOSTNAME_STRICT: "false"
+      KC_HEALTH_ENABLED: "true"
+    volumes:
+      - ./keycloak/formen-dev-realm.json:/opt/keycloak/data/import/formen-dev-realm.json:ro
+    ports:
+      - "8081:8081"
+    healthcheck:
+      test: ["CMD-SHELL", "exec 3<>/dev/tcp/127.0.0.1/8081 && exit 0 || exit 1"]
+      interval: 5s
+      timeout: 5s
+      retries: 40
+      start_period: 20s
+
+  backend:
+    environment:
+      # Local Keycloak gerçek token üretir; signature/issuer/audience/expiry
+      # doğrulaması development ortamında da çalışır.
+      ENVIRONMENT: development
+      OIDC_ISSUER_URL: http://${OIDC_DEV_HOSTNAME:-keycloak}:8081/realms/${OIDC_DEV_REALM:-formen-dev}
+      OIDC_AUDIENCE: ${OIDC_DEV_AUDIENCE:-formen-backend}
+      OIDC_JWKS_URI: ""
+      OIDC_USER_ID_CLAIM: sub
+      # AUTH_BYPASS yalnız demo girişini atlar; local Keycloak yine başlar.
+      AUTH_BYPASS: ${AUTH_BYPASS:-false}
+    depends_on:
+      keycloak:
+        condition: service_healthy
+
+  frontend:
+    environment:
+      VITE_OIDC_ISSUER_URL: http://${OIDC_DEV_HOSTNAME:-keycloak}:8081/realms/${OIDC_DEV_REALM:-formen-dev}
+      VITE_OIDC_CLIENT_ID: ${OIDC_DEV_CLIENT_ID:-formen-frontend}
+      VITE_OIDC_REDIRECT_URI: http://localhost:8080/auth/callback
+      VITE_OIDC_POST_LOGOUT_REDIRECT_URI: http://localhost:8080/login
+      VITE_AUTH_BYPASS: ${VITE_AUTH_BYPASS:-false}
+    depends_on:
+      keycloak:
+        condition: service_started
+      # Local geliştirmede frontend, backend readiness tamamlanana kadar bekler.
+      # Production'da ayrı host kurulumu bozulmasın diye bu bağımlılık yoktur.
+      backend:
+        condition: service_healthy

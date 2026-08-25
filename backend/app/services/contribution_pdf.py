@@ -48,8 +48,9 @@ def render_contribution_pdf(work: dict) -> bytes:
     elements.append(Spacer(1, 6))
 
     foremen_names = ", ".join(f["name"] for f in work.get("foremen", []))
-    plant_name = work["plant"]["name"] if work.get("plant") else "-"
-    factory_name = work["plant"]["factory_name"] if work.get("plant") and work["plant"].get("factory_name") else "-"
+    plants_text = ", ".join(
+        f"{p['factory_name']} / {p['name']}" if p.get("factory_name") else p["name"] for p in work.get("plants") or []
+    ) or "-"
     date_text = work["work_date"] or "-"
     if work.get("work_date_end"):
         date_text = f"{work['work_date']} — {work['work_date_end']}"
@@ -57,7 +58,7 @@ def render_contribution_pdf(work: dict) -> bytes:
     meta_table = Table(
         [
             ["İlgili Formenler", _escape(foremen_names or "-")],
-            ["Fabrika / Tesis", _escape(f"{factory_name} / {plant_name}")],
+            ["Fabrika / Tesis", _escape(plants_text)],
             ["Çalışma Tarihi", _escape(date_text)],
             ["Kaydeden", _escape(work.get("created_by") or "-")],
         ],

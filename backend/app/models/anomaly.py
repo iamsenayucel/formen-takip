@@ -1,7 +1,7 @@
 import uuid
 from datetime import date, datetime
 
-from sqlalchemy import JSON, Date, DateTime, Enum, ForeignKey, Numeric, String, Text
+from sqlalchemy import JSON, CheckConstraint, Date, DateTime, Enum, ForeignKey, Numeric, String, Text
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import Mapped, mapped_column
 
@@ -12,6 +12,16 @@ from app.models.enums import AnalysisMode, AnomalyAnalysisStatus, AnomalySeverit
 class Anomaly(TimestampMixin, Base):
 
     __tablename__ = "anomalies"
+    __table_args__ = (
+        CheckConstraint("period_end >= period_start", name="ck_anomalies_period_range"),
+        CheckConstraint("ml_confidence >= 0 AND ml_confidence <= 1", name="ck_anomalies_ml_confidence_range"),
+        CheckConstraint("affected_days IS NULL OR affected_days >= 0", name="ck_anomalies_affected_days_non_negative"),
+        CheckConstraint("total_days IS NULL OR total_days >= 0", name="ck_anomalies_total_days_non_negative"),
+        CheckConstraint(
+            "affected_days IS NULL OR total_days IS NULL OR affected_days <= total_days",
+            name="ck_anomalies_affected_days_lte_total_days",
+        ),
+    )
 
     id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     code: Mapped[str] = mapped_column(String(30), unique=True, nullable=False, index=True)
@@ -27,6 +37,14 @@ class Anomaly(TimestampMixin, Base):
         Enum(AnomalyAnalysisStatus, name="anomaly_analysis_status"),
         nullable=False,
         default=AnomalyAnalysisStatus.NOT_ANALYZED,
+    )
+    # analysis_status değerini o anda sahiplenen AnomalyAnalysis satırını gösterir.
+    # anomaly_analyses içindeki claim INSERT'iyle atomik olarak ayarlanır ve anomalinin
+    # claim token'ıdır. analysis_status yalnızca current_analysis_id yazan denemeyle
+    # hâlâ eşleşiyorsa güncellenir; stale-job watchdog sonrası devam eden eski worker,
+    # yeni denemenin durumunun üzerine yazamaz.
+    current_analysis_id: Mapped[uuid.UUID | None] = mapped_column(
+        ForeignKey("anomaly_analyses.id", ondelete="SET NULL"), nullable=True
     )
 
     detected_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, index=True)

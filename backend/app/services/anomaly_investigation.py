@@ -2,26 +2,56 @@ from __future__ import annotations
 
 from collections import defaultdict
 from datetime import date, timedelta
-from uuid import UUID
+from uuid import UUID, uuid4
 
 from sqlalchemy import or_, select
 from sqlalchemy.orm import Session
 
 from app.models.anomaly import Anomaly
+from app.models.enums import TargetScopeType
 from app.models.foreman import Foreman, ForemanAssignment
-from app.models.kpi import Kpi
+from app.models.kpi import Kpi, KpiTarget
 from app.models.organization import Factory, Plant, Shift
 from app.schemas.common import Filters
 from app.services import analytics
 from app.services.shift_analysis import month_label
 from app.services.shift_rotation import actual_shift_for_date
 from app.services.synthetic import world
+from app.services.target_resolver import NoTargetFoundError, resolve_target
 
 
 def _month_bounds(d: date) -> tuple[date, date]:
     start = d.replace(day=1)
     next_start = date(start.year + 1, 1, 1) if start.month == 12 else date(start.year, start.month + 1, 1)
     return start, next_start - timedelta(days=1)
+
+
+def resolve_kpi_target(db: Session, kpi: Kpi, plant: Plant, as_of: date, foreman_id: UUID | None = None) -> float:
+    candidates = list(db.scalars(select(KpiTarget).where(KpiTarget.kpi_id == kpi.id)))
+    try:
+        resolved = resolve_target(
+            candidates, as_of=as_of, foreman_id=foreman_id or uuid4(), chief_id=plant.chief_id, plant_id=plant.id,
+        )
+        return float(resolved.target_value)
+    except NoTargetFoundError:
+        return float(kpi.default_target_value)
+
+
+def resolve_company_kpi_target(db: Session, kpi: Kpi, as_of: date) -> float:
+    """Dar FOREMAN/CHIEF/PLANT override'larını yok sayıp şirket geneli KPI hedefini döndürür.
+
+    Birden fazla tesisi kapsayan değerlerde tesis hedefi tüm karşılaştırma satırlarına
+    uygulanamayacağı için kullanılır.
+    """
+    candidates = [
+        c for c in db.scalars(select(KpiTarget).where(KpiTarget.kpi_id == kpi.id))
+        if c.scope_type == TargetScopeType.COMPANY
+    ]
+    try:
+        resolved = resolve_target(candidates, as_of=as_of, foreman_id=uuid4(), chief_id=uuid4(), plant_id=uuid4())
+        return float(resolved.target_value)
+    except NoTargetFoundError:
+        return float(kpi.default_target_value)
 
 
 def _foreman_kpi_trend(db: Session, foreman_id: UUID, kpi: Kpi, plant_id: UUID, ref_date: date, months: int = 3) -> list[dict]:
@@ -225,6 +255,52 @@ def build_impact(downtime: dict | None) -> dict:
     }
 
 
+def build_shift_comparison(db: Session, anomaly: Anomaly, plant: Plant, kpi: Kpi) -> list[dict]:
+    shifts = list(db.scalars(select(Shift).where(Shift.is_active.is_(True)).order_by(Shift.sequence)))
+    if not shifts:
+        return []
+    comparison = world.compare_shifts(db, plant, kpi, anomaly.period_start, anomaly.period_end)
+    return [
+        {
+            "shift_id": str(s.id), "code": s.code, "name": s.name,
+            "value": comparison.per_shift.get(s.code),
+            "is_anomaly_shift": anomaly.shift_id == s.id,
+        }
+        for s in shifts
+    ]
+
+
+def build_factory_comparison(db: Session, anomaly: Anomaly, kpi: Kpi, anomaly_factory_code: str | None) -> list[dict]:
+    values = world.compare_factories(db, kpi, anomaly.period_start, anomaly.period_end)
+    factories = list(db.scalars(select(Factory).order_by(Factory.code)))
+    return [
+        {
+            "code": f.code, "name": f.name, "value": values.get(f.code),
+            "is_anomaly_factory": f.code == anomaly_factory_code,
+        }
+        for f in factories
+    ]
+
+
+def build_previous_month_comparison(db: Session, anomaly: Anomaly, plant: Plant, kpi: Kpi, shift: Shift | None) -> dict:
+    month_start, _ = _month_bounds(anomaly.period_start)
+    prev_end = month_start - timedelta(days=1)
+    prev_start, prev_end = _month_bounds(prev_end)
+
+    value = world.period_average(db, plant, kpi, shift, prev_start, prev_end)
+    current = float(anomaly.observed_value)
+    change_percent = round((current - value) / abs(value) * 100, 1) if value else None
+
+    return {
+        "available": True,
+        "label": month_label(prev_end),
+        "period": {"start": prev_start.isoformat(), "end": prev_end.isoformat()},
+        "value": value,
+        "current_value": current,
+        "change_percent": change_percent,
+    }
+
+
 def build_investigation(db: Session, anomaly: Anomaly) -> dict:
     plant = db.get(Plant, anomaly.plant_id)
     factory = db.get(Factory, plant.factory_id) if plant else None
@@ -242,6 +318,17 @@ def build_investigation(db: Session, anomaly: Anomaly) -> dict:
     similar_cases = build_similar_cases(db, anomaly, plant, kpi, factory) if plant is not None and kpi is not None else []
     impact = build_impact(downtime)
 
+    shift_comparison = build_shift_comparison(db, anomaly, plant, kpi) if plant is not None and kpi is not None else []
+    factory_comparison = (
+        build_factory_comparison(db, anomaly, kpi, factory.code if factory else None) if kpi is not None else []
+    )
+    previous_month = (
+        build_previous_month_comparison(db, anomaly, plant, kpi, shift)
+        if plant is not None and kpi is not None
+        else {"available": False}
+    )
+    comparison_target_value = resolve_company_kpi_target(db, kpi, anomaly.period_end) if kpi is not None else None
+
     return {
         "responsible_foreman": responsible_foreman,
         "baseline_comparison": baseline_comparison,
@@ -249,4 +336,8 @@ def build_investigation(db: Session, anomaly: Anomaly) -> dict:
         "downtime_breakdown": downtime,
         "impact": impact,
         "similar_cases": similar_cases,
+        "shift_comparison": shift_comparison,
+        "factory_comparison": factory_comparison,
+        "previous_month": previous_month,
+        "comparison_target_value": comparison_target_value,
     }

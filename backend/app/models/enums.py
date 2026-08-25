@@ -76,6 +76,31 @@ class ReportStatus(str, enum.Enum):
     FAILED = "failed"
 
 
+class ReportStorageProvider(str, enum.Enum):
+    S3 = "s3"
+    LOCAL = "local"
+
+
+class ReportGenerationStatus(str, enum.Enum):
+    PENDING = "pending"
+    GENERATING = "generating"
+    READY = "ready"
+    FAILED = "failed"
+
+
+class ReportEmailStatus(str, enum.Enum):
+    PENDING = "pending"
+    SENDING = "sending"
+    SENT = "sent"
+    FAILED = "failed"
+    SKIPPED = "skipped"
+    # Watchdog bu işin stale timeout sonrasında da SENDING kaldığını tespit etti.
+    # SMTP idempotency garantisi vermediği için otomatik yeniden denenmez; "worker
+    # göndermeden önce çöktü" ile "e-posta gönderildi, commit öncesi çöktü" ayrıştırılamaz.
+    # `resolve-stale-email-job` ile açık operatör kararı gerekir.
+    RECONCILIATION_REQUIRED = "reconciliation_required"
+
+
 class ContributionWorkType(str, enum.Enum):
     SMED = "smed"
     KAIZEN = "kaizen"
@@ -87,6 +112,11 @@ class ContributionWorkType(str, enum.Enum):
     ENERGY_RESOURCE_SAVING = "energy_resource_saving"
     PRODUCTION_EFFICIENCY = "production_efficiency"
     DIGITALIZATION = "digitalization"
+    FIVE_S = "5s"
+    VARIETY_CHANGEOVER_EFFICIENCY = "variety_changeover_efficiency"
+    STAFF_SAVING = "staff_saving"
+    CUSTOMER_COMPLAINT = "customer_complaint"
+    POKA_YOKE = "poka_yoke"
     OTHER = "other"
 
 
@@ -111,17 +141,6 @@ class GainPeriod(str, enum.Enum):
     ONE_TIME = "one_time"
     MONTHLY = "monthly"
     YEARLY = "yearly"
-
-
-class VerifyingDepartment(str, enum.Enum):
-    FINANCE = "finance"
-    PRODUCTION = "production"
-    MAINTENANCE = "maintenance"
-    QUALITY = "quality"
-    SAFETY = "safety"
-    ENERGY = "energy"
-    HR = "hr"
-    OTHER = "other"
 
 
 class TimeUnit(str, enum.Enum):

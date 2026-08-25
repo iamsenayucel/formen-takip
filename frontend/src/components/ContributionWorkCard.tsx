@@ -21,8 +21,8 @@ function initials(name: string): string {
 export function ContributionWorkCard({ work }: { work: ContributionWorkItem }) {
   const { theme } = useTheme();
   const isDark = theme === "dark";
-  const Icon = workTypeIcon(work.work_type);
-  const accent = workTypeColor(work.work_type, isDark);
+  const Icon = workTypeIcon(work.workType);
+  const accent = workTypeColor(work.workType, isDark);
   const isDraft = work.status === "draft";
   const deleteWork = useDeleteContributionWork();
 
@@ -50,7 +50,7 @@ export function ContributionWorkCard({ work }: { work: ContributionWorkItem }) {
           style={{ backgroundColor: `${accent}14`, color: accent, border: `1px solid ${accent}33` }}
         >
           <Icon size={12} strokeWidth={2.25} />
-          {workTypeLabel(work.work_type)}
+          {workTypeLabel(work.workType)}
         </span>
         {isDraft && (
           <span
@@ -72,16 +72,17 @@ export function ContributionWorkCard({ work }: { work: ContributionWorkItem }) {
       )}
 
       <div className="mt-3 flex flex-wrap items-center gap-x-3 gap-y-1 text-xs" style={{ color: "var(--text-muted)" }}>
-        {work.plant && (
+        {work.plants.length > 0 && (
           <span className="flex items-center gap-1">
             <Factory size={12} strokeWidth={2} />
-            {work.plant.factory_code} · {work.plant.name}
+            {work.plants.slice(0, 2).map((p) => `${p.factoryCode} · ${p.name}`).join(", ")}
+            {work.plants.length > 2 && ` +${work.plants.length - 2}`}
           </span>
         )}
-        {work.work_date && (
+        {work.workDate && (
           <span className="flex items-center gap-1">
             <CalendarDays size={12} strokeWidth={2} />
-            {work.work_date}
+            {work.workDate}
           </span>
         )}
       </div>
@@ -107,20 +108,20 @@ export function ContributionWorkCard({ work }: { work: ContributionWorkItem }) {
         </div>
       )}
 
-      {work.before_after && (
+      {work.beforeAfter && (
         <div className="mt-3">
-          <BeforeAfterComparison data={work.before_after} compact />
+          <BeforeAfterComparison data={work.beforeAfter} compact />
         </div>
       )}
 
-      {work.highlighted_gain && (
+      {work.highlightedGain && (
         <div className="mt-3 rounded-md p-3" style={{ background: `${accent}0d` }}>
           <div className="text-[10px] font-semibold uppercase tracking-wide" style={{ color: "var(--text-muted)" }}>
-            {work.highlighted_gain.label}
+            {work.highlightedGain.label}
           </div>
           <div className="mt-0.5 text-xl font-bold" style={{ color: accent }}>
-            {new Intl.NumberFormat("tr-TR", { maximumFractionDigits: 2 }).format(work.highlighted_gain.value)}
-            {work.highlighted_gain.unit && <span className="ml-1 text-sm font-medium">{work.highlighted_gain.unit}</span>}
+            {new Intl.NumberFormat("tr-TR", { maximumFractionDigits: 2 }).format(work.highlightedGain.value)}
+            {work.highlightedGain.unit && <span className="ml-1 text-sm font-medium">{work.highlightedGain.unit}</span>}
           </div>
         </div>
       )}
@@ -140,7 +141,7 @@ export function ContributionWorkCard({ work }: { work: ContributionWorkItem }) {
       )}
 
       <div className="mt-auto flex items-center justify-between pt-3">
-        <span className="text-xs" style={{ color: "var(--text-muted)" }}>{work.created_by ?? "-"}</span>
+        <span className="text-xs" style={{ color: "var(--text-muted)" }}>{work.createdBy ?? "-"}</span>
         <div className="flex items-center gap-3">
           <button
             type="button"

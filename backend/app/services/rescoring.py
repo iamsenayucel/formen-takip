@@ -14,6 +14,7 @@ from app.services.ingestion import run_ingestion
 from app.services.kpi_engine import KpiCalculationError, compute_score_for_rule
 from app.services.production_kpi_derivation import derive_agir_gitme, derive_raw_performance_records
 from app.services.providers.base import PerformanceDataProvider
+from app.services.rule_resolver import NoRuleFoundError, resolve_rule
 
 BATCH_SIZE = 2000
 
@@ -112,14 +113,16 @@ def ingest_inkita_backfill(db: Session) -> dict:
 
 def rescore_all(db: Session, batch_size: int = BATCH_SIZE) -> dict:
     kpis_by_id = {k.id: k for k in db.scalars(select(Kpi).where(Kpi.is_active.is_(True)))}
-    rules_by_kpi_id = {
-        r.kpi_id: r for r in db.scalars(select(KpiCalculationRule).where(KpiCalculationRule.is_active.is_(True)))
-    }
+    rules_by_kpi_id: dict = {}
+    rules_stmt = select(KpiCalculationRule).order_by(KpiCalculationRule.valid_from.desc(), KpiCalculationRule.id)
+    for rule in db.scalars(rules_stmt):
+        rules_by_kpi_id.setdefault(rule.kpi_id, []).append(rule)
 
     stmt = (
         select(
             PerformanceScore.id.label("score_id"),
             PerformanceRecord.kpi_id,
+            PerformanceRecord.performance_date,
             PerformanceRecord.actual_value,
             PerformanceRecord.target_value,
             PerformanceRecord.numerator_value,
@@ -160,8 +163,12 @@ def rescore_all(db: Session, batch_size: int = BATCH_SIZE) -> dict:
 
     for row in db.execute(stmt).yield_per(batch_size):
         kpi = kpis_by_id.get(row.kpi_id)
-        rule = rules_by_kpi_id.get(row.kpi_id) if kpi is not None else None
-        if kpi is None or rule is None or row.actual_value is None or row.target_value is None:
+        if kpi is None or row.actual_value is None or row.target_value is None:
+            skipped += 1
+            continue
+        try:
+            rule = resolve_rule(rules_by_kpi_id.get(row.kpi_id, []), row.performance_date)
+        except NoRuleFoundError:
             skipped += 1
             continue
         try:

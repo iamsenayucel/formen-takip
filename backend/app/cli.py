@@ -4,25 +4,46 @@ from __future__ import annotations
 import argparse
 import random
 import sys
-from datetime import date, datetime, timedelta
+from datetime import date, timedelta
 
-from app.core.security import hash_password
+from app.core import clock
+from app.core.config import get_settings
 from app.db.session import SessionLocal
 from app.models.foreman import Foreman
-from app.models.user import User
 from app.services.ingestion import backfill_data_quality_issues, run_ingestion
-from app.services.monthly_foreman_report import get_or_generate_monthly_report, latest_completed_period
+from app.services.monthly_foreman_report import (
+    generate_and_store_report_pdf,
+    get_or_generate_monthly_report,
+    latest_completed_period,
+)
+from app.services.job_reconciliation import (
+    reconcile_stale_anomaly_jobs,
+    reconcile_stale_email_jobs,
+    resolve_email_reconciliation,
+)
+from app.services.monthly_report_email import send_monthly_report_email
 from app.services.providers.synthetic_provider import SyntheticDataProvider
 from app.services.rescoring import apply_scoring_model_v2
 from app.services.synthetic.anomaly_generator import seed_anomalies
 from app.services.synthetic.contribution_generator import seed_contribution_works
 from app.services.synthetic.production_generator import GenerationParams, seed_production_data
-from app.services.synthetic.reference_data import regenerate_personnel_identities, seed_reference_data
+from app.services.synthetic.reference_data import (
+    kpis_needing_plant_target_variance,
+    load_existing_reference_data,
+    regenerate_personnel_identities,
+    seed_reference_data,
+    validate_plant_kpi_target_coverage,
+)
+
+# Sentetik/demo veri üretiminde created_by_subject alanı için kullanılan sabit
+# değer — gerçek kullanıcı kimliği artık yalnızca Red Hat SSO tarafından üretilir,
+# bu script uygulama içi bir "admin kullanıcı" kavramına ihtiyaç duymaz.
+SYNTHETIC_SEED_SUBJECT = "synthetic-seed-script"
 
 
 def cmd_seed(args: argparse.Namespace) -> None:
     rng = random.Random(args.seed)
-    period_end = date.fromisoformat(args.end_date) if args.end_date else date.today()
+    period_end = date.fromisoformat(args.end_date) if args.end_date else clock.today_local()
     period_start = date.fromisoformat(args.start_date) if args.start_date else period_end - timedelta(days=365)
 
     db = SessionLocal()
@@ -32,8 +53,12 @@ def cmd_seed(args: argparse.Namespace) -> None:
         from app.models.organization import Plant
 
         existing = db.scalar(select(Plant).limit(1))
-        if existing and not args.force:
-            print("Referans veri zaten mevcut. Yeniden oluşturmak için --force kullanın.")
+        if existing:
+            print(
+                "Referans veri zaten mevcut. Seed yalnızca boş veritabanında çalışır; "
+                "sentetik veriyi yeniden üretmek için veritabanını sıfırlayın, migration'ları "
+                "uygulayın ve seed komutunu tekrar çalıştırın."
+            )
             sys.exit(1)
 
         print(f"[1/3] Referans veri + KPI hedefleri üretiliyor (seed={args.seed})...")
@@ -48,6 +73,12 @@ def cmd_seed(args: argparse.Namespace) -> None:
             f"  -> {len(ref.factories)} fabrika, {len(ref.plants)} tesis, {len(ref.chiefs)} şef, "
             f"{len(ref.foremen)} formen, {len(ref.kpis)} KPI oluşturuldu."
         )
+        coverage_ok, missing = validate_plant_kpi_target_coverage(db)
+        if coverage_ok:
+            covered_kpi_count = len(kpis_needing_plant_target_variance(ref.kpis))
+            print(f"  -> Tesis x KPI hedef kapsaması doğrulandı ({len(ref.plants)} tesis x {covered_kpi_count} KPI).")
+        else:
+            print(f"  -> UYARI: {len(missing)} tesis/KPI kombinasyonunda PLANT hedefi eksik: {missing[:10]}")
 
         print(f"[2/3] Üretim verisi üretiliyor ({period_start} -> {period_end})...")
         params = GenerationParams(
@@ -72,16 +103,12 @@ def cmd_seed(args: argparse.Namespace) -> None:
             f"atlanan (tekrar): {run.skipped_count}, hatalı: {run.error_count}, durum: {run.status.value}"
         )
 
-        admin = db.scalar(select(User).order_by(User.created_at).limit(1))
-        if admin:
-            print("[4/4] Katkı ve iyileştirme çalışmaları örnek verisi üretiliyor...")
-            contrib = seed_contribution_works(db, rng, admin.id, count=40)
-            print(
-                f"  -> {contrib.works_created} çalışma oluşturuldu "
-                f"({contrib.published_count} yayımlandı, {contrib.draft_count} taslak)."
-            )
-        else:
-            print("[4/5] Kullanıcı bulunamadığı için katkı çalışması örneği atlandı (önce create-admin çalıştırın).")
+        print("[4/5] Katkı ve iyileştirme çalışmaları örnek verisi üretiliyor...")
+        contrib = seed_contribution_works(db, rng, SYNTHETIC_SEED_SUBJECT, count=40)
+        print(
+            f"  -> {contrib.works_created} çalışma oluşturuldu "
+            f"({contrib.published_count} yayımlandı, {contrib.draft_count} taslak)."
+        )
 
         print("[5/5] Sentetik ML tespitleri (Tespitler modülü) üretiliyor...")
         anomalies = seed_anomalies(db, rng)
@@ -90,25 +117,135 @@ def cmd_seed(args: argparse.Namespace) -> None:
         db.close()
 
 
-def cmd_create_admin(args: argparse.Namespace) -> None:
+_LEVEL_LABEL_EN = {"Kritik": "Critical", "Geliştirilmeli": "Needs Improvement", "Başarılı": "Successful"}
+_TARGET_DISTRIBUTION_RANGES = {"Kritik": (25.0, 30.0), "Geliştirilmeli": (35.0, 40.0), "Başarılı": (30.0, 35.0)}
+_DISTRIBUTION_TOLERANCE_PP = 3.0
+
+
+def _print_synthetic_performance_validation(db, period_start: date, period_end: date) -> None:
+    import statistics
+
+    from sqlalchemy import select
+
+    from app.schemas.common import Filters
+    from app.services import analytics
+    from app.services.kpi_engine import resolve_performance_level
+    from app.services.level_lookup import get_performance_levels
+
+    filters = Filters(date_from=period_start, date_to=period_end)
+    levels = get_performance_levels(db)
+    all_scores = analytics.foreman_scores(db, filters)
+    scores = [s for s in all_scores if s.is_reliable]
+
+    print("\nSynthetic Performance Validation")
+    print(f"\nTotal Foremen: {len(scores)}")
+    if not scores:
+        print("UYARI: Güvenilir formen puanı bulunamadı, dağılım hesaplanamıyor.")
+        return
+
+    n = len(scores)
+    counts = {"Kritik": 0, "Geliştirilmeli": 0, "Başarılı": 0}
+    for s in scores:
+        level = resolve_performance_level(s.total_score, levels)
+        counts[level.name] = counts.get(level.name, 0) + 1
+
+    print()
+    for name in ("Kritik", "Geliştirilmeli", "Başarılı"):
+        c = counts.get(name, 0)
+        print(f"{name + ':':<20}{c:>5} ({c / n * 100:5.1f}%)")
+
+    values = sorted(s.total_score for s in scores)
+    quantiles = statistics.quantiles(values, n=4) if n >= 4 else [values[0], values[len(values) // 2], values[-1]]
+    print("\nScore Statistics")
+    print("-" * 20)
+    print(f"Min:    {values[0]:.2f}")
+    print(f"P25:    {quantiles[0]:.2f}")
+    print(f"Median: {statistics.median(values):.2f}")
+    print(f"P75:    {quantiles[2]:.2f}")
+    print(f"Max:    {values[-1]:.2f}")
+    print(f"Mean:   {statistics.mean(values):.2f}")
+
+    foremen_by_id = {f.id: f for f in db.scalars(select(Foreman))}
+    ordered = sorted(scores, key=lambda s: s.total_score)
+    sample_idxs = sorted(set([0, n // 4, n // 2, (3 * n) // 4, n - 1]))
+
+    print(f"\n{'Foreman':<24}{'Score':>8}   Level")
+    print("-" * 46)
+    for idx in sample_idxs:
+        s = ordered[idx]
+        f = foremen_by_id.get(s.key)
+        name = f"{f.first_name} {f.last_name}" if f else str(s.key)
+        level = resolve_performance_level(s.total_score, levels)
+        print(f"{name:<24}{s.total_score:>8.1f}   {_LEVEL_LABEL_EN.get(level.name, level.name)}")
+
+    print()
+    all_within_tolerance = True
+    for name, (lo, hi) in _TARGET_DISTRIBUTION_RANGES.items():
+        pct = counts.get(name, 0) / n * 100
+        within_tolerance = (lo - _DISTRIBUTION_TOLERANCE_PP) <= pct <= (hi + _DISTRIBUTION_TOLERANCE_PP)
+        all_within_tolerance = all_within_tolerance and within_tolerance
+        print(f"{name}: %{pct:.1f} (hedef %{lo:.0f}-{hi:.0f}) -> {'OK' if within_tolerance else 'UYARI'}")
+
+    if all_within_tolerance:
+        print("\nDağılım hedeflenen aralıklara uygun.")
+    else:
+        print(
+            "\nUYARI: Dağılım hedeflenen aralıklardan belirgin şekilde sapıyor — "
+            "app/services/synthetic/production_generator.py içindeki TIER_SKILL_CENTER/TIER_SKILL_SPREAD "
+            "sabitlerinin yeniden kalibre edilmesi gerekebilir."
+        )
+
+
+def cmd_regenerate_synthetic_performance(args: argparse.Namespace) -> None:
+    from sqlalchemy import text
+
+    rng = random.Random(args.seed)
+    period_end = date.fromisoformat(args.end_date) if args.end_date else clock.today_local()
+    period_start = date.fromisoformat(args.start_date) if args.start_date else period_end - timedelta(days=365)
+
     db = SessionLocal()
     try:
-        from sqlalchemy import select
+        ref = load_existing_reference_data(db)
+        if not ref.plants or not ref.foremen:
+            print("Mevcut organizasyon verisi bulunamadı — önce 'seed' komutunu çalıştırın.")
+            sys.exit(1)
 
-        existing = db.scalar(select(User).where(User.email == args.email))
-        if existing:
-            print(f"Kullanıcı zaten mevcut: {args.email}")
-            return
-        user = User(
-            email=args.email,
-            password_hash=hash_password(args.password),
-            full_name=args.full_name,
-            title="Genel Müdür",
-            is_active=True,
+        print(
+            f"[1/4] Mevcut organizasyon yapısı yüklendi: {len(ref.plants)} tesis, {len(ref.foremen)} formen, "
+            f"{len(ref.assignments)} atama (organizasyon yapısı değiştirilmeyecek)."
         )
-        db.add(user)
+
+        print("[2/4] Eski sentetik üretim/performans verisi temizleniyor (organizasyon ve KPI tanımları korunuyor)...")
+        db.execute(
+            text(
+                "TRUNCATE performance_scores, performance_records, data_quality_issues, integration_runs, "
+                "production_records, foreman_work_calendar, company_calendar, production_lines, products CASCADE"
+            )
+        )
         db.commit()
-        print(f"Üst yönetim kullanıcısı oluşturuldu: {args.email}")
+
+        print(f"[3/4] Üretim verisi yeniden üretiliyor ({period_start} -> {period_end}, seed={args.seed})...")
+        params = GenerationParams(
+            missing_rate=args.missing_rate, error_rate=args.error_rate,
+            anomaly_rate=args.anomaly_rate, duplicate_rate=args.duplicate_rate,
+        )
+        production = seed_production_data(db, rng, ref, period_start, period_end, params)
+        print(
+            f"  -> {len(production.products)} ürün, "
+            f"{sum(len(v) for v in production.lines_by_plant.values())} hat, "
+            f"{len(production.work_calendar)} çalışma takvimi kaydı, "
+            f"{len(production.production_records)} üretim kaydı oluşturuldu."
+        )
+
+        print("[4/4] KPI türetme ve ingestion çalıştırılıyor...")
+        provider = SyntheticDataProvider(db, rng, duplicate_rate=args.duplicate_rate)
+        run = run_ingestion(db, provider, period_start, period_end, plant_codes=[p.code for p in ref.plants])
+        print(
+            f"  -> İşlenen: {run.processed_count}, başarılı: {run.success_count}, "
+            f"atlanan (tekrar): {run.skipped_count}, hatalı: {run.error_count}, durum: {run.status.value}"
+        )
+
+        _print_synthetic_performance_validation(db, period_start, period_end)
     finally:
         db.close()
 
@@ -145,14 +282,8 @@ def cmd_apply_scoring_model_v2(args: argparse.Namespace) -> None:
 def cmd_seed_contributions(args: argparse.Namespace) -> None:
     db = SessionLocal()
     try:
-        from sqlalchemy import select
-
-        admin = db.scalar(select(User).order_by(User.created_at).limit(1))
-        if not admin:
-            print("Kullanıcı bulunamadı. Önce create-admin çalıştırın.")
-            sys.exit(1)
         print(f"Katkı ve iyileştirme çalışmaları örnek verisi üretiliyor (seed={args.seed}, count={args.count})...")
-        result = seed_contribution_works(db, random.Random(args.seed), admin.id, count=args.count)
+        result = seed_contribution_works(db, random.Random(args.seed), SYNTHETIC_SEED_SUBJECT, count=args.count)
         print(
             f"  -> {result.works_created} çalışma oluşturuldu "
             f"({result.published_count} yayımlandı, {result.draft_count} taslak)."
@@ -176,6 +307,7 @@ def cmd_generate_monthly_reports(args: argparse.Namespace) -> None:
     try:
         from sqlalchemy import select
 
+        settings = get_settings()
         if args.year and args.month:
             year, month = args.year, args.month
         else:
@@ -186,16 +318,123 @@ def cmd_generate_monthly_reports(args: argparse.Namespace) -> None:
         created = 0
         already_existed = 0
         errors = 0
+        upload_errors = 0
         for foreman_id in foreman_ids:
             try:
                 before = _report_exists(db, foreman_id, year, month)
-                get_or_generate_monthly_report(db, foreman_id, year, month)
+                report = get_or_generate_monthly_report(db, foreman_id, year, month)
                 already_existed += 1 if before else 0
                 created += 0 if before else 1
             except ValueError as exc:
                 errors += 1
                 print(f"  -> {foreman_id}: {exc}")
-        print(f"  -> oluşturulan: {created}, zaten mevcut: {already_existed}, hata: {errors}")
+                continue
+            try:
+                generate_and_store_report_pdf(db, report, settings)
+            except Exception as exc:
+                upload_errors += 1
+                print(f"  -> {foreman_id}: PDF/S3 upload başarısız: {exc}")
+        print(
+            f"  -> oluşturulan: {created}, zaten mevcut: {already_existed}, hata: {errors}, "
+            f"PDF/upload hatası: {upload_errors}"
+        )
+    finally:
+        db.close()
+
+
+def cmd_send_monthly_report_emails(args: argparse.Namespace) -> None:
+    from sqlalchemy import select
+
+    from app.models.enums import ReportEmailStatus
+    from app.models.foreman_report import ForemanMonthlyReport
+
+    settings = get_settings()
+    if not settings.smtp_available:
+        print("Aylık formen rapor e-postaları gönderimi atlandı: SMTP yapılandırılmamış "
+              "(SMTP_ENABLED/SMTP_HOST/SMTP_FROM) — hiçbir gönderim denenmedi, raporlar PENDING "
+              "durumunda kaldı, retry sayaçları değişmedi.")
+        return
+
+    db = SessionLocal()
+    try:
+        if args.year and args.month:
+            year, month = args.year, args.month
+        else:
+            year, month = latest_completed_period()
+
+        statuses = [ReportEmailStatus.PENDING]
+        if args.retry_failed:
+            statuses.append(ReportEmailStatus.FAILED)
+
+        reports = list(
+            db.scalars(
+                select(ForemanMonthlyReport).where(
+                    ForemanMonthlyReport.year == year,
+                    ForemanMonthlyReport.month == month,
+                    ForemanMonthlyReport.email_status.in_(statuses),
+                )
+            )
+        )
+        print(f"Aylık formen rapor e-postaları gönderiliyor ({year}-{month:02d}, {len(reports)} aday)...")
+
+        sent = skipped = failed = retry_exhausted = 0
+        for report in reports:
+            if args.retry_failed and report.email_retry_count >= settings.email_max_retry_count:
+                retry_exhausted += 1
+                continue
+            send_monthly_report_email(db, report, settings)
+            if report.email_status == ReportEmailStatus.SENT:
+                sent += 1
+            elif report.email_status == ReportEmailStatus.SKIPPED:
+                skipped += 1
+            else:
+                failed += 1
+        print(
+            f"  -> gönderildi: {sent}, atlandı (veri yetersiz): {skipped}, başarısız: {failed}, "
+            f"deneme limiti aşıldı: {retry_exhausted}"
+        )
+    finally:
+        db.close()
+
+
+def cmd_reconcile_stale_jobs(args: argparse.Namespace) -> None:
+    settings = get_settings()
+    db = SessionLocal()
+    try:
+        print(
+            f"E-posta job'ları taranıyor (SENDING > {settings.email_stale_claim_timeout_seconds}s claimed_at)..."
+        )
+        email_result = reconcile_stale_email_jobs(db, settings)
+        print(
+            f"  -> {email_result.scanned_candidates} aday, {len(email_result.recovered_ids)} tanesi "
+            "RECONCILIATION_REQUIRED durumuna alındı (otomatik yeniden gönderim YAPILMAZ — bkz. README "
+            "'Job Claiming & Concurrency'). Çözmek için: resolve-stale-email-job --report-id <id> "
+            "--resolution sent|retry"
+        )
+
+        print(
+            f"Tespit analiz job'ları taranıyor (in-progress > {settings.anomaly_stale_claim_timeout_seconds}s "
+            "started_at)..."
+        )
+        anomaly_result = reconcile_stale_anomaly_jobs(db, settings)
+        print(
+            f"  -> {anomaly_result.scanned_candidates} aday, {len(anomaly_result.recovered_ids)} tanesi "
+            "FAILED durumuna alındı (ilgili tespit için 'Yeniden Analiz Et' ile manuel tekrar denenebilir)."
+        )
+    finally:
+        db.close()
+
+
+def cmd_resolve_stale_email_job(args: argparse.Namespace) -> None:
+    import uuid as uuid_module
+
+    db = SessionLocal()
+    try:
+        report = resolve_email_reconciliation(db, uuid_module.UUID(args.report_id), args.resolution)
+        print(f"  -> report_id={report.id} email_status={report.email_status.value}")
+    except ValueError as exc:
+        print(f"Hata: {exc}")
+        sys.exit(1)
     finally:
         db.close()
 
@@ -212,6 +451,27 @@ def _report_exists(db, foreman_id, year: int, month: int) -> bool:
             ForemanMonthlyReport.month == month,
         )
     ) is not None
+
+
+def cmd_backfill_contribution_scores(args: argparse.Namespace) -> None:
+    from sqlalchemy import select
+
+    from app.models.contribution import ContributionGain, ContributionWork
+    from app.services import contribution_calc as calc
+
+    db = SessionLocal()
+    try:
+        print("Katkı puanı eksik/ güncel olmayan çalışmalar yeniden hesaplanıyor...")
+        works = list(db.scalars(select(ContributionWork)))
+        updated = 0
+        for work in works:
+            gains = list(db.scalars(select(ContributionGain).where(ContributionGain.work_id == work.id)))
+            work.contribution_score = calc.compute_contribution_score(work, gains)[0]
+            updated += 1
+        db.commit()
+        print(f"  -> {updated} çalışma güncellendi.")
+    finally:
+        db.close()
 
 
 def cmd_regenerate_personnel(args: argparse.Namespace) -> None:
@@ -238,14 +498,7 @@ def main() -> None:
     seed_parser.add_argument("--error-rate", type=float, default=0.01)
     seed_parser.add_argument("--anomaly-rate", type=float, default=0.015)
     seed_parser.add_argument("--duplicate-rate", type=float, default=0.005)
-    seed_parser.add_argument("--force", action="store_true", help="Referans veri mevcutsa bile devam et")
     seed_parser.set_defaults(func=cmd_seed)
-
-    admin_parser = sub.add_parser("create-admin", help="Üst yönetim demo kullanıcısı oluşturur")
-    admin_parser.add_argument("--email", type=str, default="genel.mudur@formen-demo.com")
-    admin_parser.add_argument("--password", type=str, default="Demo!2026")
-    admin_parser.add_argument("--full-name", type=str, default="Demo Genel Müdür")
-    admin_parser.set_defaults(func=cmd_create_admin)
 
     regen_parser = sub.add_parser(
         "regenerate-personnel-identities",
@@ -253,6 +506,21 @@ def main() -> None:
     )
     regen_parser.add_argument("--seed", type=int, default=42)
     regen_parser.set_defaults(func=cmd_regenerate_personnel)
+
+    regen_perf_parser = sub.add_parser(
+        "regenerate-synthetic-performance",
+        help="Mevcut organizasyon yapısını (fabrika/tesis/şef/formen/atama) ve KPI tanımlarını koruyarak yalnızca "
+        "sentetik üretim/performans verisini daha dengeli bir Kritik/Geliştirilmeli/Başarılı dağılımıyla yeniden "
+        "üretir; sonunda dağılım doğrulama raporu basar",
+    )
+    regen_perf_parser.add_argument("--seed", type=int, default=42)
+    regen_perf_parser.add_argument("--start-date", type=str, default=None, help="YYYY-MM-DD")
+    regen_perf_parser.add_argument("--end-date", type=str, default=None, help="YYYY-MM-DD")
+    regen_perf_parser.add_argument("--missing-rate", type=float, default=0.02)
+    regen_perf_parser.add_argument("--error-rate", type=float, default=0.01)
+    regen_perf_parser.add_argument("--anomaly-rate", type=float, default=0.015)
+    regen_perf_parser.add_argument("--duplicate-rate", type=float, default=0.005)
+    regen_perf_parser.set_defaults(func=cmd_regenerate_synthetic_performance)
 
     backfill_parser = sub.add_parser(
         "backfill-data-quality-issues", help="Faz 1'de üretilmiş kayıtlar için geriye dönük veri kalitesi sorunu kayıtları oluşturur"
@@ -292,6 +560,48 @@ def main() -> None:
     monthly_reports_parser.add_argument("--year", type=int, default=None)
     monthly_reports_parser.add_argument("--month", type=int, default=None)
     monthly_reports_parser.set_defaults(func=cmd_generate_monthly_reports)
+
+    send_emails_parser = sub.add_parser(
+        "send-monthly-report-emails",
+        help="Üretilmiş aylık formen raporlarını PDF eki ile ilgili formene (TO) ve şefine (CC) e-postayla "
+        "gönderir — rapor üretiminden bağımsız, ayrı bir adımdır; --year/--month verilmezse en son "
+        "tamamlanmış ay kullanılır. SENT durumundaki raporlar normalde tekrar gönderilmez.",
+    )
+    send_emails_parser.add_argument("--year", type=int, default=None)
+    send_emails_parser.add_argument("--month", type=int, default=None)
+    send_emails_parser.add_argument(
+        "--retry-failed", action="store_true",
+        help="PENDING'e ek olarak, email_retry_count < EMAIL_MAX_RETRY_COUNT olan FAILED raporları da tekrar dener",
+    )
+    send_emails_parser.set_defaults(func=cmd_send_monthly_report_emails)
+
+    reconcile_parser = sub.add_parser(
+        "reconcile-stale-jobs",
+        help="Watchdog: claimed (SENDING/in-progress) süresi timeout'u aşan e-posta ve tespit analiz "
+        "job'larını tarar. E-posta job'ları asla otomatik yeniden gönderilmez (duplicate mail riski) — "
+        "RECONCILIATION_REQUIRED durumuna alınır ve 'resolve-stale-email-job' ile manuel çözülür. Tespit "
+        "analiz job'ları FAILED yapılır (manuel 'Yeniden Analiz Et' ile tekrar denenebilir). Cron/scheduler "
+        "ile periyodik çalıştırılması önerilir.",
+    )
+    reconcile_parser.set_defaults(func=cmd_reconcile_stale_jobs)
+
+    resolve_email_parser = sub.add_parser(
+        "resolve-stale-email-job",
+        help="RECONCILIATION_REQUIRED durumundaki bir aylık rapor e-postasını operatör kararıyla çözer: "
+        "'sent' (SMTP/relay loglarından gerçekten gönderildiği doğrulandı, SENT olarak işaretlenir, bir "
+        "daha denenmez) veya 'retry' (gönderilmediği doğrulandı, PENDING'e alınır, bir sonraki "
+        "send-monthly-report-emails çalıştırmasında tekrar denenir).",
+    )
+    resolve_email_parser.add_argument("--report-id", required=True, help="foreman_monthly_reports.id (UUID)")
+    resolve_email_parser.add_argument("--resolution", required=True, choices=["sent", "retry"])
+    resolve_email_parser.set_defaults(func=cmd_resolve_stale_email_job)
+
+    backfill_scores_parser = sub.add_parser(
+        "backfill-contribution-scores",
+        help="Var olan tüm katkı çalışmalarının sistem tarafından hesaplanan 1-5 katkı puanını yeniden hesaplar "
+        "(puanlama kriterleri değiştiğinde veya eski kayıtlarda puan eksikse kullanılır)",
+    )
+    backfill_scores_parser.set_defaults(func=cmd_backfill_contribution_scores)
 
     args = parser.parse_args()
     args.func(args)

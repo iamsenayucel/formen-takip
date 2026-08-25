@@ -1,8 +1,7 @@
 import { useState } from "react";
 import { useLocation, useNavigate } from "react-router-dom";
-import { HardHat, ShieldAlert, Trophy } from "lucide-react";
 import { FilterBar } from "../components/FilterBar";
-import { StatCard } from "../components/StatCard";
+import { PageHeader } from "../components/PageHeader";
 import { Card } from "../components/StateViews";
 import { LoadingState, ErrorState } from "../components/StateViews";
 import { TrendChart } from "../components/charts/TrendChart";
@@ -11,68 +10,104 @@ import { RankingBarChart } from "../components/charts/RankingBarChart";
 import { DistributionChart } from "../components/charts/DistributionChart";
 import { ForemanRankingCard } from "../components/ForemanRankingCard";
 import { PerformanceLevelDetailModal } from "../components/PerformanceLevelDetailModal";
-import { CriticalAnomalyCard } from "../components/CriticalAnomalyCard";
 import { PlantHeatmap } from "../components/PlantHeatmap";
+import { CriticalAnomalyCard } from "../components/CriticalAnomalyCard";
+import { ExecutiveHero } from "../components/dashboard/ExecutiveHero";
 import type { DistributionItem } from "../api/types";
-import {
-  useDashboardSummary, useDashboardTrend, useKpiSummary,
-  useShiftComparison, useForemanRanking, useForemanTrendRanking, usePerformanceDistribution,
-} from "../api/hooks";
+import { useDashboardSnapshot, useDashboardTrend } from "../api/hooks";
 import { useFilters } from "../hooks/useFilters";
 import { withSearchParam } from "../lib/chartDrilldown";
+import { formatDateRangeTR } from "../lib/dateFormat";
 
 export function DashboardPage() {
   const { filters, setFilters, clearFilters, asQueryParams } = useFilters();
   const navigate = useNavigate();
   const location = useLocation();
 
-  const summary = useDashboardSummary(asQueryParams);
+  const snapshot = useDashboardSnapshot(asQueryParams);
   const trend = useDashboardTrend(asQueryParams, "day");
-  const kpiSummary = useKpiSummary(asQueryParams);
-  const shiftComparison = useShiftComparison(asQueryParams);
-  const foremanRankingTop = useForemanRanking(asQueryParams, "desc", 5);
-  const foremanRankingBottom = useForemanRanking(asQueryParams, "asc", 5);
-  const foremanTrendImproving = useForemanTrendRanking(asQueryParams, "improving", 5);
-  const foremanTrendDeclining = useForemanTrendRanking(asQueryParams, "declining", 5);
-  const distribution = usePerformanceDistribution(asQueryParams);
+
+  const summary = { isLoading: snapshot.isLoading, isError: snapshot.isError, data: snapshot.data?.summary };
+  const kpiSummary = { isLoading: snapshot.isLoading, data: snapshot.data?.kpiSummary };
+  const shiftComparison = { isLoading: snapshot.isLoading, data: snapshot.data?.shiftComparison };
+  const foremanRankingTop = { isLoading: snapshot.isLoading, data: snapshot.data?.foremanRanking.top };
+  const foremanRankingBottom = { isLoading: snapshot.isLoading, data: snapshot.data?.foremanRanking.bottom };
+  const foremanTrendImproving = { isLoading: snapshot.isLoading, data: snapshot.data?.foremanTrendRanking.improving };
+  const foremanTrendDeclining = { isLoading: snapshot.isLoading, data: snapshot.data?.foremanTrendRanking.declining };
+  const distribution = { isLoading: snapshot.isLoading, data: snapshot.data?.performanceDistribution };
   const [selectedLevel, setSelectedLevel] = useState<DistributionItem | null>(null);
+  const [selectedLevelQueryOverride, setSelectedLevelQueryOverride] = useState<Record<string, string> | undefined>(undefined);
+  const [selectedGroupId, setSelectedGroupId] = useState<string | null>(null);
+
+  const closeLevelModal = () => {
+    setSelectedLevel(null);
+    setSelectedLevelQueryOverride(undefined);
+  };
+
+  const trendPoints = trend.data?.points ?? [];
+  const firstTrendPoint = trendPoints[0];
+  const latestTrendPoint = trendPoints[trendPoints.length - 1];
+  const trendDelta = trendPoints.length > 1 ? latestTrendPoint.totalScore - firstTrendPoint.totalScore : null;
+  const trendSubtitle =
+    trendPoints.length > 0 ? `Son ${trendPoints.length} gün · ${formatDateRangeTR(firstTrendPoint.date, latestTrendPoint.date)}` : undefined;
 
   return (
-    <div className="flex flex-col gap-4">
+    <div className="flex flex-col gap-[var(--space-section-gap)]">
+      <PageHeader title="Genel Bakış" />
+
       <FilterBar filters={filters} setFilters={setFilters} clearFilters={clearFilters} />
 
-      {summary.isLoading && <LoadingState />}
-      {summary.isError && <ErrorState />}
-      {summary.data && (
-        <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 xl:grid-cols-6">
-          <StatCard label="Aktif Formen" value={summary.data.total_active_foremen} icon={HardHat} to="/foremen" />
-          <StatCard label="Mükemmel Formen" value={summary.data.foremen_excellent} icon={Trophy} />
-          <StatCard label="Kritik Formen" value={summary.data.foremen_critical} icon={ShieldAlert} />
-          <StatCard
-            label="En Başarılı Tesis"
-            value={summary.data.best_plant?.name ?? "-"}
-            sub={summary.data.best_plant ? `${summary.data.best_plant.score?.toFixed(1)} puan` : undefined}
-            to={summary.data.best_plant ? `/plants/${summary.data.best_plant.id}` : undefined}
-          />
-          <StatCard
-            label="En Düşük Performanslı Tesis"
-            value={summary.data.worst_plant?.name ?? "-"}
-            sub={summary.data.worst_plant ? `${summary.data.worst_plant.score?.toFixed(1)} puan` : undefined}
-            to={summary.data.worst_plant ? `/plants/${summary.data.worst_plant.id}` : undefined}
-          />
-          <StatCard
-            label="En Fazla İyileştirme Gereken KPI"
-            value={summary.data.weakest_kpi?.name ?? "-"}
-            sub={summary.data.weakest_kpi ? `${summary.data.weakest_kpi.avg_score.toFixed(1)} puan` : undefined}
-          />
-        </div>
-      )}
+      <ExecutiveHero
+        summary={summary.data}
+        isLoading={summary.isLoading}
+        isError={summary.isError}
+        filters={filters}
+      />
 
       <CriticalAnomalyCard />
 
-      <div className="grid grid-cols-1 gap-4 xl:grid-cols-3">
-        <div className="xl:col-span-2">
-          <Card title="Genel Performans Trendi">
+      <div className="grid grid-cols-1 gap-[var(--space-section-gap)] xl:grid-cols-3">
+        <div className="min-w-0 xl:col-span-2">
+          <Card
+            title="Operasyonel Performans Trendi"
+            subtitle={trendSubtitle}
+            action={
+              latestTrendPoint && (
+                <div className="flex items-center gap-4">
+                  <div className="text-right">
+                    <div className="text-label" style={{ color: "var(--text-muted)" }}>
+                      Son Değer
+                    </div>
+                    <div className="text-card-title tabular-nums" style={{ color: "var(--text-primary)" }}>
+                      {latestTrendPoint.totalScore.toFixed(1)}
+                    </div>
+                  </div>
+                  <div className="text-right">
+                    <div className="text-label" style={{ color: "var(--text-muted)" }}>
+                      Hedef
+                    </div>
+                    <div className="text-card-title tabular-nums" style={{ color: "var(--text-muted)" }}>
+                      100
+                    </div>
+                  </div>
+                  {trendDelta !== null && (
+                    <div className="text-right">
+                      <div className="text-label" style={{ color: "var(--text-muted)" }}>
+                        Dönem Farkı
+                      </div>
+                      <div
+                        className="text-card-title tabular-nums"
+                        style={{ color: trendDelta >= 0 ? "var(--status-positive)" : "var(--status-negative)" }}
+                      >
+                        {trendDelta >= 0 ? "+" : ""}
+                        {trendDelta.toFixed(1)}
+                      </div>
+                    </div>
+                  )}
+                </div>
+              )
+            }
+          >
             {trend.isLoading ? (
               <LoadingState />
             ) : trend.data ? (
@@ -80,7 +115,7 @@ export function DashboardPage() {
                 points={trend.data.points}
                 yAxisFloor={
                   foremanRankingBottom.data && foremanRankingBottom.data.items.length > 0
-                    ? Math.min(...foremanRankingBottom.data.items.map((f) => f.total_score)) - 20
+                    ? Math.min(...foremanRankingBottom.data.items.map((f) => f.generalPerformanceScore)) - 20
                     : undefined
                 }
               />
@@ -93,20 +128,32 @@ export function DashboardPage() {
           {distribution.isLoading ? (
             <LoadingState />
           ) : distribution.data ? (
-            <DistributionChart items={distribution.data.items} onSelect={setSelectedLevel} />
+            <DistributionChart
+              items={distribution.data.items}
+              onSelect={(item) => {
+                setSelectedLevel(item);
+                setSelectedLevelQueryOverride(undefined);
+              }}
+            />
           ) : (
             <ErrorState />
           )}
         </Card>
       </div>
 
-      <PlantHeatmap filters={asQueryParams} levels={distribution.data?.items} />
+      <PlantHeatmap
+        filters={asQueryParams}
+        levels={distribution.data?.items}
+        selectedGroupId={selectedGroupId}
+        onSelectGroup={setSelectedGroupId}
+      />
 
       {selectedLevel && (
         <PerformanceLevelDetailModal
           level={selectedLevel}
           filterParams={asQueryParams}
-          onClose={() => setSelectedLevel(null)}
+          queryOverride={selectedLevelQueryOverride}
+          onClose={closeLevelModal}
           onNavigateForeman={(id) => navigate(`/foremen/${id}`)}
         />
       )}
@@ -125,7 +172,7 @@ export function DashboardPage() {
         onViewAll={() => navigate("/foremen")}
       />
 
-      <div className="grid grid-cols-1 gap-4 xl:grid-cols-2">
+      <div className="grid grid-cols-1 gap-[var(--space-section-gap)] xl:grid-cols-2">
         <Card title="KPI Bazlı Ortalama Puan">
           {kpiSummary.isLoading ? (
             <LoadingState />
@@ -143,7 +190,7 @@ export function DashboardPage() {
             <LoadingState />
           ) : shiftComparison.data ? (
             <RankingBarChart
-              items={shiftComparison.data.items.map((s) => ({ id: s.shift_id, name: s.name, score: s.total_score, color: s.level.color }))}
+              items={shiftComparison.data.items.map((s) => ({ id: s.shiftId, name: s.name ?? "-", score: s.totalScore, color: s.level.color }))}
               onSelect={(item) => navigate({ pathname: `/shifts/${item.id}`, search: location.search })}
             />
           ) : (

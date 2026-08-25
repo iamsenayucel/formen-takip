@@ -1,114 +1,114 @@
-import { CalendarClock, History, Repeat, TrendingUp } from "lucide-react";
+import type { ReactNode } from "react";
+import { CalendarClock, History, Target, Users } from "lucide-react";
 import type { AnomalyDetail, AnomalyInvestigation } from "../../api/types";
-import { formatSignedPct } from "../../lib/kpiDirection";
+import { changeWord, formatMetricValue, magnitudeWord, primaryDelta } from "../../lib/anomalyMetrics";
+import { formatPct, performanceDirection, PERFORMANCE_COLORS } from "../../lib/kpiDirection";
 
-type ThresholdStatus = "critical" | "warning" | "normal" | "unknown";
-
-function thresholdStatus(a: AnomalyDetail): ThresholdStatus {
-  const { desired_direction, critical_threshold, warning_threshold } = a.kpi_definition;
-  if (desired_direction == null || critical_threshold == null || warning_threshold == null) return "unknown";
-  const observed = a.observed_value;
-  if (desired_direction === "low") {
-    if (observed >= critical_threshold) return "critical";
-    if (observed >= warning_threshold) return "warning";
-    return "normal";
-  }
-  if (observed <= critical_threshold) return "critical";
-  if (observed <= warning_threshold) return "warning";
-  return "normal";
-}
-
-const THRESHOLD_TEXT: Record<ThresholdStatus, string> = {
-  critical: "Kritik eşik aşıldı",
-  warning: "Uyarı eşiği aşıldı",
-  normal: "Eşiklerin içinde",
-  unknown: "Bu kriter için eşik verisi mevcut değil.",
-};
-
-function shiftDeviationNote(a: AnomalyDetail): string {
-  if (!a.shift_id || !a.shift_name) return "Tespit belirli bir vardiyaya özgü değil.";
-  const shiftEntries = Object.entries(a.comparison).filter(([key]) => /_average$/.test(key) && key !== "plant_average" && key !== "factory_average");
-  if (shiftEntries.length < 2) return "Vardiya karşılaştırma verisi mevcut değil.";
-  const values = shiftEntries.map(([, v]) => Number(v));
-  const spread = Math.max(...values) - Math.min(...values);
-  const plantAvg = a.comparison.plant_average;
-  if (plantAvg == null || spread === 0) return "Vardiyalar arasında belirgin bir fark tespit edilmedi.";
-  const higherIsBetter = a.kpi_definition.desired_direction === "high";
-  const isWorstShift = higherIsBetter ? a.observed_value === Math.min(...values) : a.observed_value === Math.max(...values);
-  return isWorstShift
-    ? `${a.shift_name} diğer vardiyalara göre belirgin şekilde daha kötü.`
-    : "Bu vardiya diğerlerine göre öne çıkmıyor; sapma vardiyalar geneline yayılmış olabilir.";
-}
-
-function ReasonCard({ icon, title, value, note }: { icon: React.ReactNode; title: string; value: string; note: string }) {
+function ReasonCard({ icon, title, children }: { icon: ReactNode; title: string; children: ReactNode }) {
   return (
     <div className="rounded-lg p-3.5" style={{ background: "var(--page-bg)", border: "1px solid var(--border)" }}>
-      <div className="flex items-center gap-1.5 text-[11px] font-semibold uppercase tracking-wide" style={{ color: "var(--text-muted)" }}>
+      <div className="flex items-center gap-1.5 text-[13px] font-semibold" style={{ color: "var(--text-primary)" }}>
         {icon}
         {title}
       </div>
-      <p className="mt-1.5 text-lg font-bold tabular-nums" style={{ color: "var(--text-primary)" }}>{value}</p>
-      <p className="mt-0.5 text-xs" style={{ color: "var(--text-secondary)" }}>{note}</p>
+      <div className="mt-1.5 text-[13px]" style={{ color: "var(--text-secondary)" }}>{children}</div>
     </div>
   );
 }
 
-export function DetectionReasonCards({ anomaly, investigation }: { anomaly: AnomalyDetail; investigation?: AnomalyInvestigation }) {
-  const a = anomaly;
-  const status = thresholdStatus(a);
-  const persistenceRatio = a.affected_days != null && a.total_days ? a.affected_days / a.total_days : null;
+function WorseDot() {
+  return <span className="inline-block h-1.5 w-1.5 shrink-0 rounded-full" style={{ background: "var(--status-negative)" }} />;
+}
 
-  const baseline = investigation?.baseline_comparison;
-  let historicalNote = "Hesaplanıyor...";
-  let historicalValue = "-";
-  if (investigation) {
-    if (baseline?.available && baseline.pct_change != null) {
-      historicalValue = formatSignedPct(baseline.pct_change);
-      historicalNote = baseline.direction === "worsened"
-        ? "Önceki döneme göre kötüleşme gözlendi."
-        : baseline.direction === "improved"
-        ? "Önceki döneme göre iyileşme gözlendi."
-        : "Önceki döneme göre belirgin bir değişim yok.";
-    } else {
-      historicalValue = "-";
-      historicalNote = baseline?.reason ?? "Bu kriter için açıklama verisi mevcut değil.";
+const Muted = ({ children }: { children: ReactNode }) => <span style={{ color: "var(--text-muted)" }}>{children}</span>;
+
+export function DetectionReasonCards({
+  anomaly, investigation, investigationLoading,
+}: {
+  anomaly: AnomalyDetail;
+  investigation?: AnomalyInvestigation;
+  investigationLoading: boolean;
+}) {
+  const a = anomaly;
+  const higherIsBetter = a.kpiDefinition.desiredDirection === "high";
+
+  let deviationBody: ReactNode = <Muted>Hedef bilgisi mevcut değil.</Muted>;
+  if (a.targetValue != null) {
+    const { pctDiff } = primaryDelta(a.observedValue, a.targetValue);
+    if (pctDiff != null) {
+      const dir = performanceDirection(a.kpiDefinition.desiredDirection, pctDiff > 0);
+      deviationBody = (
+        <span className="text-lg font-bold tabular-nums" style={{ color: PERFORMANCE_COLORS[dir] }}>
+          Hedeften {formatPct(Math.abs(pctDiff), 1)} {magnitudeWord(pctDiff)}
+        </span>
+      );
     }
   }
 
+  const hasPersistence = a.affectedDays != null && a.totalDays != null;
+
+  const shiftEntries = investigation?.shiftComparison ?? [];
+  const shiftValues = shiftEntries.map((s) => s.value).filter((v): v is number => v != null);
+  const worstShiftValue = shiftValues.length > 1 ? (higherIsBetter ? Math.min(...shiftValues) : Math.max(...shiftValues)) : null;
+
+  const prevMonth = investigation?.previousMonth;
+
   return (
-    <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-4">
-      <ReasonCard
-        icon={<TrendingUp size={13} strokeWidth={2} />}
-        title="Sapma Büyüklüğü"
-        value={formatSignedPct(a.deviation_percent)}
-        note={THRESHOLD_TEXT[status]}
-      />
-      <ReasonCard
-        icon={<Repeat size={13} strokeWidth={2} />}
-        title="Süreklilik"
-        value={a.affected_days != null && a.total_days != null ? `${a.affected_days} / ${a.total_days} gün` : "-"}
-        note={
-          persistenceRatio == null
-            ? "Bu kriter için açıklama verisi mevcut değil."
-            : persistenceRatio >= 0.6
-            ? "Tek günlük bir rastlantı değil, dönem boyunca tekrarlanmış."
-            : persistenceRatio <= 0.2
-            ? "Sınırlı sayıda günde gözlenmiş."
-            : "Dönemin bir bölümünde gözlenmiş."
-        }
-      />
-      <ReasonCard
-        icon={<CalendarClock size={13} strokeWidth={2} />}
-        title="Vardiya Farkı"
-        value={a.shift_name ?? "Vardiyaya özgü değil"}
-        note={shiftDeviationNote(a)}
-      />
-      <ReasonCard
-        icon={<History size={13} strokeWidth={2} />}
-        title="Tarihsel Sapma"
-        value={historicalValue}
-        note={historicalNote}
-      />
+    <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+      <ReasonCard icon={<Target size={13} strokeWidth={2} />} title="Hedeften Sapma">
+        {deviationBody}
+      </ReasonCard>
+
+      <ReasonCard icon={<CalendarClock size={13} strokeWidth={2} />} title="Sorunun Devamlılığı">
+        {hasPersistence ? (
+          <>Sorun son <strong style={{ color: "var(--text-primary)" }}>{a.totalDays} günün {a.affectedDays}'inde</strong> görüldü.</>
+        ) : (
+          <Muted>Devamlılık verisi mevcut değil.</Muted>
+        )}
+      </ReasonCard>
+
+      <ReasonCard icon={<Users size={13} strokeWidth={2} />} title="Vardiya Karşılaştırması">
+        {investigationLoading && <Muted>Yükleniyor…</Muted>}
+        {!investigationLoading && shiftEntries.length === 0 && <Muted>Vardiya verisi mevcut değil.</Muted>}
+        {!investigationLoading && shiftEntries.length > 0 && (
+          <ul className="flex flex-col gap-1">
+            {shiftEntries.map((s) => (
+              <li key={s.shiftId} className="flex items-center gap-1.5">
+                {s.value != null && worstShiftValue != null && s.value === worstShiftValue && <WorseDot />}
+                <span
+                  className="tabular-nums"
+                  style={{
+                    color: s.isAnomalyShift ? "var(--text-primary)" : "var(--text-secondary)",
+                    fontWeight: s.isAnomalyShift ? 600 : 400,
+                  }}
+                >
+                  {s.name}: {s.value != null ? formatMetricValue(s.value, a.unit) : "-"}
+                </span>
+              </li>
+            ))}
+          </ul>
+        )}
+      </ReasonCard>
+
+      <ReasonCard icon={<History size={13} strokeWidth={2} />} title="Önceki Ay">
+        {investigationLoading && <Muted>Yükleniyor…</Muted>}
+        {!investigationLoading && (!prevMonth?.available || prevMonth.value == null) && <Muted>Önceki ay verisi mevcut değil.</Muted>}
+        {!investigationLoading && prevMonth?.available && prevMonth.value != null && (
+          <div className="flex flex-col gap-0.5">
+            <span>
+              {prevMonth.label}: <strong style={{ color: "var(--text-primary)" }}>{formatMetricValue(prevMonth.value, a.unit)}</strong>
+            </span>
+            {prevMonth.changePercent != null && (
+              <span
+                className="font-semibold tabular-nums"
+                style={{ color: PERFORMANCE_COLORS[performanceDirection(a.kpiDefinition.desiredDirection, prevMonth.changePercent > 0)] }}
+              >
+                {changeWord(prevMonth.changePercent)}: {formatPct(Math.abs(prevMonth.changePercent), 1)}
+              </span>
+            )}
+          </div>
+        )}
+      </ReasonCard>
     </div>
   );
 }

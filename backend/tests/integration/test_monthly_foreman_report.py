@@ -1,4 +1,5 @@
 import uuid
+from tests.helpers import legacy_json
 
 from sqlalchemy import func, select
 
@@ -46,7 +47,7 @@ class TestMonthlyForemanReport:
 
         resp = client.get(f"/api/v1/foremen/{foreman_id}/monthly-reports/{year}/{month}", headers=auth_headers)
         assert resp.status_code == 200, resp.text
-        body = resp.json()
+        body = legacy_json(resp)
         assert body["year"] == year
         assert body["month"] == month
         data = body["report_data"]
@@ -68,7 +69,7 @@ class TestMonthlyForemanReport:
 
         first = client.get(f"/api/v1/foremen/{foreman_id}/monthly-reports/{year}/{month}", headers=auth_headers)
         second = client.get(f"/api/v1/foremen/{foreman_id}/monthly-reports/{year}/{month}", headers=auth_headers)
-        assert first.json()["generated_at"] == second.json()["generated_at"]
+        assert legacy_json(first)["generated_at"] == legacy_json(second)["generated_at"]
 
     def test_list_includes_generated_report(self, client, auth_headers, db_session):
         year, month = latest_completed_period()
@@ -77,7 +78,7 @@ class TestMonthlyForemanReport:
 
         resp = client.get(f"/api/v1/foremen/{foreman_id}/monthly-reports", headers=auth_headers)
         assert resp.status_code == 200
-        items = resp.json()["items"]
+        items = legacy_json(resp)["items"]
         assert any(item["year"] == year and item["month"] == month for item in items)
 
     def test_latest_returns_available_report(self, client, auth_headers, db_session):
@@ -86,7 +87,7 @@ class TestMonthlyForemanReport:
 
         resp = client.get(f"/api/v1/foremen/{foreman_id}/monthly-reports/latest", headers=auth_headers)
         assert resp.status_code == 200
-        assert resp.json()["available"] is True
+        assert legacy_json(resp)["available"] is True
 
     def test_pdf_download_returns_valid_pdf(self, client, auth_headers, db_session):
         year, month = latest_completed_period()

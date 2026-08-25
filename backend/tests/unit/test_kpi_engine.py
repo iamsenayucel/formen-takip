@@ -14,6 +14,7 @@ from app.services.kpi_engine import (
     compute_weighted_total,
     direct_score,
     higher_is_better,
+    is_outstanding_performance,
     lower_is_better,
     period_ratio_score,
     proportional_penalty,
@@ -29,6 +30,7 @@ from app.services.kpi_engine import (
     score_plan_achievement_from_signed_deviation,
     score_plan_compliance,
     score_plan_compliance_from_period_deviation,
+    score_target_ratio_linear_bonus,
     validate_kpi_weights,
     weighted_geometric_score,
 )
@@ -205,28 +207,49 @@ class TestWeightedTotal:
 
 class TestPerformanceLevel:
     LEVELS = [
-        PerformanceLevel("Kritik", 0, 69.99, "", "red", "alert", 1),
-        PerformanceLevel("Geliştirilmeli", 70, 79.99, "", "orange", "warning", 2),
-        PerformanceLevel("İyi", 80, 89.99, "", "yellow", "thumbs-up", 3),
-        PerformanceLevel("Çok İyi", 90, 99.99, "", "blue", "star", 4),
-        PerformanceLevel("Mükemmel", 100, 120, "", "green", "trophy", 5),
+        PerformanceLevel("Kritik", 0, 69.99, "", "red", "alert-triangle", 1),
+        PerformanceLevel("Geliştirilmeli", 70, 89.99, "", "orange", "trending-down", 2),
+        PerformanceLevel("Başarılı", 90, 9999.99, "", "green", "check-circle", 3),
     ]
 
-    def test_mid_range(self):
-        assert resolve_performance_level(91, self.LEVELS).name == "Çok İyi"
+    def test_critical_low(self):
+        assert resolve_performance_level(0, self.LEVELS).name == "Kritik"
 
-    def test_boundary_value(self):
-        assert resolve_performance_level(100, self.LEVELS).name == "Mükemmel"
+    def test_critical_upper_boundary(self):
+        assert resolve_performance_level(69.99, self.LEVELS).name == "Kritik"
 
-    def test_critical(self):
-        assert resolve_performance_level(50, self.LEVELS).name == "Kritik"
+    def test_needs_improvement_lower_boundary(self):
+        assert resolve_performance_level(70, self.LEVELS).name == "Geliştirilmeli"
+
+    def test_needs_improvement_upper_boundary(self):
+        assert resolve_performance_level(89.99, self.LEVELS).name == "Geliştirilmeli"
+
+    def test_successful_lower_boundary(self):
+        assert resolve_performance_level(90, self.LEVELS).name == "Başarılı"
+
+    def test_successful_mid_range(self):
+        assert resolve_performance_level(100, self.LEVELS).name == "Başarılı"
 
     def test_above_max_clips_to_top(self):
-        assert resolve_performance_level(150, self.LEVELS).name == "Mükemmel"
+        assert resolve_performance_level(150, self.LEVELS).name == "Başarılı"
 
     def test_no_levels_raises(self):
         with pytest.raises(KpiCalculationError):
             resolve_performance_level(50, [])
+
+
+class TestOutstandingPerformance:
+    def test_below_threshold(self):
+        assert is_outstanding_performance(104.99) is False
+
+    def test_at_threshold(self):
+        assert is_outstanding_performance(105) is True
+
+    def test_above_threshold(self):
+        assert is_outstanding_performance(120) is True
+
+    def test_typical_successful_score_not_outstanding(self):
+        assert is_outstanding_performance(100) is False
 
 
 class TestRatioAggregation:
@@ -378,6 +401,45 @@ class TestScoreInkita:
             score_inkita(1.0, -1.0)
 
 
+class TestScoreOee:
+
+    def test_full_day_scores_105(self):
+        result = score_target_ratio_linear_bonus(1440, 1440)
+        assert result.capped_score == pytest.approx(105.0)
+
+    def test_1200_minutes_scores_87_5(self):
+        result = score_target_ratio_linear_bonus(1200, 1440)
+        assert result.raw_score == pytest.approx(87.5)
+        assert result.capped_score == pytest.approx(87.5)
+
+    def test_720_minutes_scores_52_5(self):
+        result = score_target_ratio_linear_bonus(720, 1440)
+        assert result.capped_score == pytest.approx(52.5)
+
+    def test_zero_minutes_scores_zero(self):
+        result = score_target_ratio_linear_bonus(0, 1440)
+        assert result.capped_score == pytest.approx(0.0)
+
+    def test_score_never_exceeds_max_score(self):
+        result = score_target_ratio_linear_bonus(1440, 100)
+        assert result.raw_score > 105.0
+        assert result.capped_score == pytest.approx(105.0)
+
+    def test_score_never_below_zero(self):
+        result = score_target_ratio_linear_bonus(-10, 1440)
+        assert result.capped_score == pytest.approx(0.0)
+
+    def test_missing_or_invalid_target_raises(self):
+        with pytest.raises(KpiCalculationError):
+            score_target_ratio_linear_bonus(100, 0)
+        with pytest.raises(KpiCalculationError):
+            score_target_ratio_linear_bonus(100, -1)
+
+    def test_custom_ratio_multiplier_and_max_score_params(self):
+        result = score_target_ratio_linear_bonus(100, 100, ratio_multiplier=1.10, max_score=110.0)
+        assert result.capped_score == pytest.approx(110.0)
+
+
 class TestScorePlanCompliance:
 
     @pytest.mark.parametrize(
@@ -516,6 +578,10 @@ class TestCustomFormulaDispatch:
         result = calculate_custom_score(1.10, 0.80, "TARGET_RATIO_PIECEWISE", {"good_coefficient": 12, "bad_coefficient": 12})
         assert result.capped_score == pytest.approx(94.49, abs=0.01)
 
+    def test_dispatches_target_ratio_linear_bonus(self):
+        result = calculate_custom_score(1200, 1440, "TARGET_RATIO_LINEAR_BONUS", {"ratio_multiplier": 1.05, "max_score": 105})
+        assert result.capped_score == pytest.approx(87.5)
+
     def test_unknown_formula_type_raises(self):
         with pytest.raises(KpiCalculationError):
             calculate_custom_score(1.0, 1.0, "NOT_A_REAL_FORMULA", {})
@@ -553,6 +619,14 @@ class TestComputeScoreForRule:
             compute_score_for_rule(
                 CalculationType.CUSTOM_FORMULA, {"formula_type": "ASYMMETRIC_PLAN_ACHIEVEMENT"}, actual=100, target=100,
             )
+
+    def test_oee_formula_type_uses_actual_target_directly(self):
+        result = compute_score_for_rule(
+            CalculationType.CUSTOM_FORMULA,
+            {"formula_type": "TARGET_RATIO_LINEAR_BONUS", "ratio_multiplier": 1.05, "max_score": 105},
+            actual=720, target=1440,
+        )
+        assert result.capped_score == pytest.approx(52.5)
 
     def test_non_custom_formula_falls_back_to_generic_engine(self):
         result = compute_score_for_rule(CalculationType.HIGHER_IS_BETTER, {}, actual=950, target=1000, min_score=0, max_score=120)

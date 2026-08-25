@@ -1,8 +1,12 @@
+from types import SimpleNamespace
+
 import pytest
 
-from app.models.enums import OtherGainType, RepeatPeriod, TimeUnit
+from app.models.enums import FinancialGainStatus, ImpactLevel, OtherGainType, RepeatPeriod, TimeUnit
 from app.services.contribution_calc import (
+    CONTRIBUTION_SCORE_LABELS,
     compute_change,
+    compute_contribution_score,
     compute_monthly_total,
     compute_time_saving,
     duration_to_minutes,
@@ -81,7 +85,7 @@ class TestIsImprovement:
 
 class TestValidateForPublish:
     VALID = {
-        "title": "Başlık", "foreman_ids": ["id"], "plant_id": "id", "work_date": "2026-01-01",
+        "title": "Başlık", "foreman_ids": ["id"], "plant_ids": ["id"], "work_date": "2026-01-01",
         "work_type": "smed", "summary": "Özet", "problem_description": "Problem", "solution_description": "Çözüm",
     }
 
@@ -108,3 +112,85 @@ class TestValidateForPublish:
     def test_date_range_end_before_start_is_reported(self):
         data = {**self.VALID, "work_date": "2026-02-01", "work_date_end": "2026-01-01"}
         assert "work_date_end" in validate_for_publish(data)
+
+
+def _work(**overrides):
+    defaults = dict(
+        impact_level=ImpactLevel.LOW,
+        is_applicable_other_plants=False,
+        is_permanent_solution=False,
+        is_standardized=False,
+        work_instruction_updated=False,
+        financial_gain_status=FinancialGainStatus.NOT_CALCULATED,
+        monthly_total_saving_minutes=None,
+    )
+    defaults.update(overrides)
+    return SimpleNamespace(**defaults)
+
+
+class TestComputeContributionScore:
+    def test_minimal_work_scores_minimum(self):
+        score, _ = compute_contribution_score(_work(), [])
+        assert score == 1
+
+    def test_maximal_work_scores_maximum(self):
+        work = _work(
+            impact_level=ImpactLevel.HIGH,
+            is_applicable_other_plants=True,
+            is_permanent_solution=True,
+            is_standardized=True,
+            work_instruction_updated=True,
+            financial_gain_status=FinancialGainStatus.YES,
+        )
+        score, _ = compute_contribution_score(work, [])
+        assert score == 5
+
+    def test_score_never_below_one(self):
+        work = _work(impact_level=None)
+        score, _ = compute_contribution_score(work, [])
+        assert score == 1
+
+    def test_score_never_above_five(self):
+        work = _work(
+            impact_level=ImpactLevel.HIGH, is_applicable_other_plants=True, is_permanent_solution=True,
+            is_standardized=True, work_instruction_updated=True, financial_gain_status=FinancialGainStatus.YES,
+        )
+        gains = [SimpleNamespace(change_amount=-1.0, change_percent=-10.0)]
+        score, _ = compute_contribution_score(work, gains)
+        assert 1 <= score <= 5
+
+    def test_higher_impact_never_scores_lower(self):
+        low_score, _ = compute_contribution_score(_work(impact_level=ImpactLevel.LOW), [])
+        medium_score, _ = compute_contribution_score(_work(impact_level=ImpactLevel.MEDIUM), [])
+        high_score, _ = compute_contribution_score(_work(impact_level=ImpactLevel.HIGH), [])
+        assert low_score <= medium_score <= high_score
+
+    def test_measurable_financial_gain_scores_at_least_as_high_as_none(self):
+        no_gain, _ = compute_contribution_score(_work(), [])
+        with_gain, _ = compute_contribution_score(_work(financial_gain_status=FinancialGainStatus.YES), [])
+        assert with_gain >= no_gain
+
+    def test_measurable_gain_from_gain_rows_counts_toward_verifiability(self):
+        no_gain, _ = compute_contribution_score(_work(), [])
+        with_gain, _ = compute_contribution_score(
+            _work(), [SimpleNamespace(change_amount=-1.1, change_percent=-26.19)]
+        )
+        assert with_gain >= no_gain
+
+    def test_manual_score_override_is_impossible_by_construction(self):
+        # compute_contribution_score client tarafından verilen score'u kabul eden bir
+        # parametre içermez; tek girdiler çalışmanın kendi alanları ve kazanımlarıdır.
+        import inspect
+
+        assert list(inspect.signature(compute_contribution_score).parameters) == ["work", "gains"]
+
+    def test_breakdown_total_matches_returned_score(self):
+        work = _work(impact_level=ImpactLevel.MEDIUM, is_permanent_solution=True)
+        score, breakdown = compute_contribution_score(work, [])
+        total_entry = next(b for b in breakdown if b["label"] == "Toplam")
+        assert str(score) in total_entry["detail"]
+        assert CONTRIBUTION_SCORE_LABELS[score] in total_entry["detail"]
+
+    @pytest.mark.parametrize("score", [1, 2, 3, 4, 5])
+    def test_all_scores_have_labels(self, score):
+        assert score in CONTRIBUTION_SCORE_LABELS

@@ -1,0 +1,30 @@
+# Formen scheduler — see scheduler/README.md for why cron (not Celery/Redis/
+# k8s CronJob) and the single-instance requirement.
+#
+# CRON_TZ pins the schedule below to business local time regardless of the
+# container's own TZ — Karaman is a single location (see root CLAUDE.md), so
+# there's one business timezone, matching app/core/config.py's
+# `timezone: str = "Europe/Istanbul"` default used everywhere else via
+# app/core/clock.py. Without this, cron falls back to the container's system
+# time (UTC in the base image), so day-1 02:00/03:00 below would actually
+# fire at 05:00/06:00 Istanbul time.
+CRON_TZ=Europe/Istanbul
+
+# cron gives jobs a near-empty environment (no DATABASE_URL, no SMTP_*, ...)
+# regardless of the container's actual env — entrypoint.sh dumps it to
+# /etc/formen-scheduler.env at startup and every job line sources it first.
+
+# reconcile-stale-jobs is a pure watchdog scan (no side effect unless a job
+# has actually been stuck past its timeout — see app/services/job_reconciliation.py),
+# safe to run often.
+*/15 * * * * . /etc/formen-scheduler.env && cd /app && python -m app.cli reconcile-stale-jobs >> /proc/1/fd/1 2>> /proc/1/fd/2
+
+# generate-monthly-reports is idempotent per foreman+month (skips ones that
+# already exist) — see app/cli.py::cmd_generate_monthly_reports.
+0 2 1 * * . /etc/formen-scheduler.env && cd /app && python -m app.cli generate-monthly-reports >> /proc/1/fd/1 2>> /proc/1/fd/2
+
+# Runs after the 02:00 report generation above. SENT reports are not resent
+# by default (no --retry-failed here) — see app/cli.py::cmd_send_monthly_report_emails.
+0 3 1 * * . /etc/formen-scheduler.env && cd /app && python -m app.cli send-monthly-report-emails >> /proc/1/fd/1 2>> /proc/1/fd/2
+
+# cron requires a trailing newline

@@ -2,6 +2,7 @@ import { useMemo, useState } from "react";
 import { ChevronDown, X } from "lucide-react";
 import { useForemen } from "../api/hooks";
 import { fieldClass, fieldStyle } from "../lib/formStyles";
+import { useDismissablePopover } from "../hooks/useDismissablePopover";
 
 export interface SelectedForeman {
   id: string;
@@ -17,8 +18,11 @@ interface Props {
 export function ForemanMultiSelect({ selected, onChange, disabled }: Props) {
   const [open, setOpen] = useState(false);
   const [query, setQuery] = useState("");
+  const close = () => setOpen(false);
+  const triggerRef = useDismissablePopover(open, close);
 
-  const results = useForemen({ search: query || undefined, page_size: 10 });
+  const results = useForemen({ search: query || undefined }, 10);
+  const resultItems = results.data?.pages.flatMap((page) => page.items) ?? [];
   const selectedIds = useMemo(() => new Set(selected.map((s) => s.id)), [selected]);
 
   const toggle = (id: string, name: string) => {
@@ -53,9 +57,12 @@ export function ForemanMultiSelect({ selected, onChange, disabled }: Props) {
       )}
 
       <button
+        ref={triggerRef}
         type="button"
         disabled={disabled}
         onClick={() => setOpen((o) => !o)}
+        aria-haspopup="listbox"
+        aria-expanded={open}
         className={`flex w-full items-center justify-between ${fieldClass} disabled:opacity-50`}
         style={fieldStyle}
       >
@@ -65,7 +72,7 @@ export function ForemanMultiSelect({ selected, onChange, disabled }: Props) {
 
       {open && !disabled && (
         <>
-          <div className="fixed inset-0 z-10" onClick={() => setOpen(false)} />
+          <div className="fixed inset-0 z-10" onClick={close} />
           <div
             className="absolute z-20 mt-1 w-full rounded-md shadow-lg"
             style={{ background: "var(--surface)", border: "1px solid var(--border)" }}
@@ -77,6 +84,7 @@ export function ForemanMultiSelect({ selected, onChange, disabled }: Props) {
                 value={query}
                 onChange={(e) => setQuery(e.target.value)}
                 placeholder="Ad, soyad veya sicil no ara..."
+                aria-label="Formen ara"
                 className={fieldClass}
                 style={fieldStyle}
               />
@@ -85,10 +93,10 @@ export function ForemanMultiSelect({ selected, onChange, disabled }: Props) {
               {results.isLoading && (
                 <div className="p-2 text-xs" style={{ color: "var(--text-muted)" }}>Aranıyor...</div>
               )}
-              {results.data && results.data.items.length === 0 && (
+              {results.data && resultItems.length === 0 && (
                 <div className="p-2 text-xs" style={{ color: "var(--text-muted)" }}>Eşleşen formen yok</div>
               )}
-              {results.data?.items.map((f) => (
+              {resultItems.map((f) => (
                 <label
                   key={f.id}
                   className="flex cursor-pointer items-center gap-2 rounded px-2 py-1.5 text-[13px] hover:bg-[var(--page-bg)]"
@@ -97,10 +105,10 @@ export function ForemanMultiSelect({ selected, onChange, disabled }: Props) {
                   <input
                     type="checkbox"
                     checked={selectedIds.has(f.id)}
-                    onChange={() => toggle(f.id, f.full_name)}
+                    onChange={() => toggle(f.id, f.fullName)}
                   />
                   <span className="min-w-0 truncate">
-                    {f.full_name} <span style={{ color: "var(--text-muted)" }}>— {f.employee_number}</span>
+                    {f.fullName} <span style={{ color: "var(--text-muted)" }}>— {f.employeeNumber}</span>
                   </span>
                 </label>
               ))}

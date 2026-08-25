@@ -12,18 +12,33 @@ export interface FilterState {
   foremanIds: string[];
 }
 
+// Business tarihler backend ile aynı sözleşmeyi kullanır: Europe/Istanbul takvim
+// günü. Tarayıcının kendi işletim sistemi saat dilimi farklı olabileceğinden
+// (veya Date#toISOString() gibi UTC'ye çeviren API'ler) "bugün" burada her
+// zaman Europe/Istanbul'a göre hesaplanır — browser timezone'u business
+// timezone sanılmaz.
+const ISTANBUL_DATE_FORMATTER = new Intl.DateTimeFormat("en-CA", { timeZone: "Europe/Istanbul" });
+
 function todayIso(): string {
-  return new Date().toISOString().slice(0, 10);
+  return ISTANBUL_DATE_FORMATTER.format(new Date());
 }
 
 function daysAgoIso(days: number): string {
-  const d = new Date();
-  d.setDate(d.getDate() - days);
-  return d.toISOString().slice(0, 10);
+  const [year, month, day] = todayIso().split("-").map(Number);
+  const shifted = new Date(Date.UTC(year, month - 1, day - days));
+  return shifted.toISOString().slice(0, 10);
+}
+
+function istanbulCurrentYear(): number {
+  return Number(todayIso().slice(0, 4));
 }
 
 export function defaultDateRange(): [string, string] {
   return [daysAgoIso(30), todayIso()];
+}
+
+export function businessTodayIso(): string {
+  return todayIso();
 }
 
 const DEFAULTS: FilterState = {
@@ -107,6 +122,6 @@ export const DATE_PRESETS: { label: string; getRange: () => [string, string] }[]
   { label: "Son 30 Gün", getRange: () => [daysAgoIso(30), todayIso()] },
   { label: "Son 3 Ay", getRange: () => [daysAgoIso(90), todayIso()] },
   { label: "Son 6 Ay", getRange: () => [daysAgoIso(180), todayIso()] },
-  { label: "Bu Yıl", getRange: () => [`${new Date().getFullYear()}-01-01`, todayIso()] },
+  { label: "Bu Yıl", getRange: () => [`${istanbulCurrentYear()}-01-01`, todayIso()] },
   { label: "Son 12 Ay", getRange: () => [daysAgoIso(365), todayIso()] },
 ];

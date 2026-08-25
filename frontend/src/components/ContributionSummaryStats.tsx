@@ -4,7 +4,7 @@ import { LoadingState, ErrorState } from "./StateViews";
 import { useContributionSummary } from "../api/hooks";
 import { formatMinutes, formatMoney } from "../lib/contributionCalc";
 
-export function ContributionSummaryStats({ title = "Katkılar Özeti", onViewAll, linkStatsTo, params }: {
+export function ContributionSummaryStats({ title = "Operational Impact+ Özeti", onViewAll, linkStatsTo, params }: {
   title?: string;
   onViewAll?: () => void;
   linkStatsTo?: string;
@@ -34,21 +34,16 @@ export function ContributionSummaryStats({ title = "Katkılar Özeti", onViewAll
       {contributionSummary.isError && <ErrorState />}
       {contributionSummary.data && (
         <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 xl:grid-cols-5">
-          <StatCard label="Toplam Çalışma" value={contributionSummary.data.total_works} icon={Lightbulb} to={linkStatsTo} />
-          <StatCard label="Bu Ay Eklenen" value={contributionSummary.data.added_this_month} icon={Sparkles} />
+          <StatCard label="Toplam Çalışma" value={contributionSummary.data.totalWorks} icon={Lightbulb} to={linkStatsTo} />
+          <StatCard label="Bu Ay Eklenen" value={contributionSummary.data.addedThisMonth} icon={Sparkles} />
           <StatCard
-            label="Toplam Tahmini Kazanç"
-            value={formatMoney(contributionSummary.data.total_estimated_gain, "TRY")}
-            icon={Wallet}
-          />
-          <StatCard
-            label="Toplam Doğrulanmış Kazanç"
-            value={formatMoney(contributionSummary.data.total_verified_gain, "TRY")}
+            label="Toplam Kazanç"
+            value={formatMoney(contributionSummary.data.totalGainAmount, "TRY")}
             icon={Wallet}
           />
           <StatCard
             label="Aylık Zaman Kazancı"
-            value={formatMinutes(contributionSummary.data.total_monthly_time_saving_minutes)}
+            value={formatMinutes(contributionSummary.data.totalMonthlyTimeSavingMinutes)}
             icon={HardHat}
           />
         </div>

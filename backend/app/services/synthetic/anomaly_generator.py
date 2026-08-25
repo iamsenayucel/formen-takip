@@ -2,16 +2,18 @@ from __future__ import annotations
 
 import random
 from dataclasses import dataclass, field
-from datetime import date, datetime, timedelta, timezone
+from datetime import date, datetime, time, timedelta
 
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
+from app.core import clock
 from app.models.anomaly import Anomaly
 from app.models.enums import AnomalyAnalysisStatus, AnomalySeverity, AnomalyStatus, AnomalyType
 from app.models.foreman import Foreman, ForemanAssignment
 from app.models.kpi import Kpi
 from app.models.organization import Factory, Plant, Shift
+from app.schemas.anomaly import AnomalyCreate
 from app.services.anomaly_kpi_defs import KPI_DEFINITIONS
 
 _SCENARIOS: list[dict] = [
@@ -63,6 +65,12 @@ _SCENARIOS: list[dict] = [
          shift_specific=True, days_ago=0, period_days=5, affected_ratio=1.0, dev_range=(-30.0, -22.0)),
     dict(type=AnomalyType.DATA_QUALITY_SUSPECT, kpi="ISKARTA", factory="K2", severity="low",
          shift_specific=False, days_ago=10, period_days=14, affected_ratio=0.3, dev_range=(12.0, 18.0)),
+    dict(type=AnomalyType.SINGLE_DAY_SPIKE, kpi="OEE", factory="K1", severity="high",
+         shift_specific=False, days_ago=2, period_days=1, affected_ratio=1.0, dev_range=(-38.0, -25.0)),
+    dict(type=AnomalyType.CHRONIC_ANOMALY, kpi="OEE", factory="K2", severity="critical",
+         shift_specific=False, days_ago=1, period_days=30, affected_ratio=0.63, dev_range=(-22.0, -14.0)),
+    dict(type=AnomalyType.PLANT_HISTORICAL_DEVIATION, kpi="OEE", factory="K1", severity="medium",
+         shift_specific=False, days_ago=6, period_days=21, affected_ratio=0.45, dev_range=(-16.0, -11.0)),
 ]
 
 _STATUS_CYCLE = [
@@ -78,8 +86,9 @@ _RELATED_SIGNAL_POOL: dict[str, list[str]] = {
     "PLANA_UYUM": ["AGIR_GITME", "INKITA"],
     "GSF": ["ISKARTA", "AGIR_GITME"],
     "ISKARTA": ["GSF", "AGIR_GITME"],
-    "INKITA": ["PLANA_UYUM", "ISKARTA"],
+    "INKITA": ["PLANA_UYUM", "ISKARTA", "OEE"],
     "AGIR_GITME": ["GSF", "PLANA_UYUM"],
+    "OEE": ["INKITA", "PLANA_UYUM"],
 }
 
 _SHIFT_NOTE_POOL = [
@@ -174,7 +183,7 @@ def _build_case(spec: dict, index: int, ref: dict, rng: random.Random, today: da
     affected_days = max(1, round(total_days * spec["affected_ratio"]))
     period_end = today - timedelta(days=spec["days_ago"])
     period_start = period_end - timedelta(days=total_days - 1)
-    detected_at = datetime.combine(period_end, datetime.min.time(), tzinfo=timezone.utc) + timedelta(hours=7, minutes=30)
+    detected_at = clock.to_utc(datetime.combine(period_end, time(7, 30)))
 
     related_codes = _RELATED_SIGNAL_POOL.get(spec["kpi"], [])
     related_signals = []
@@ -286,7 +295,7 @@ def _build_case(spec: dict, index: int, ref: dict, rng: random.Random, today: da
 
 def generate_anomaly_fixtures(db: Session, rng: random.Random, today: date | None = None) -> list[dict]:
     ref = _load_reference(db)
-    today = today or date.today()
+    today = today or clock.today_local()
     cases = []
     for i, spec in enumerate(_SCENARIOS):
         note = rng.choice(_SHIFT_NOTE_POOL) if rng.random() < 0.3 else ""
@@ -307,6 +316,7 @@ def seed_anomalies(db: Session, rng: random.Random) -> AnomalySeedResult:
         existing = db.scalar(select(Anomaly).where(Anomaly.code == case["code"]))
         if existing is not None:
             continue
+        AnomalyCreate(**case)
         db.add(Anomaly(**case))
         result.anomalies_created += 1
         result.codes.append(case["code"])

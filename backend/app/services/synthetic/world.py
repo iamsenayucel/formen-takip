@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import random
+from collections.abc import Sequence
 from dataclasses import dataclass
 from datetime import date, timedelta
 from uuid import UUID
@@ -117,14 +118,29 @@ def generic_baseline(kpi: Kpi) -> float:
     return round(max(0.5, warning * 0.4), 2)
 
 
-def _value_for_date(db: Session, plant: Plant, kpi: Kpi, shift: Shift | None, d: date) -> float:
+def _cached_anchor(db: Session, plant: Plant, kpi: Kpi, anchor_cache: dict | None) -> Anomaly | None:
+    if anchor_cache is None:
+        return find_anchor(db, plant.id, kpi.id)
+    key = (plant.id, kpi.id)
+    if key not in anchor_cache:
+        anchor_cache[key] = find_anchor(db, plant.id, kpi.id)
+    return anchor_cache[key]
+
+
+def _value_for_date(
+    db: Session, plant: Plant, kpi: Kpi, shift: Shift | None, d: date, anchor_cache: dict | None = None,
+    active_shifts: Sequence[Shift] | None = None,
+) -> float:
     if shift is None:
-        shifts = list(db.scalars(select(Shift).where(Shift.is_active.is_(True))))
+        shifts = (
+            active_shifts if active_shifts is not None
+            else list(db.scalars(select(Shift).where(Shift.is_active.is_(True))))
+        )
         if shifts:
-            values = [_value_for_date(db, plant, kpi, s, d) for s in shifts]
+            values = [_value_for_date(db, plant, kpi, s, d, anchor_cache, active_shifts) for s in shifts]
             return round(sum(values) / len(values), 2)
 
-    anchor = find_anchor(db, plant.id, kpi.id)
+    anchor = _cached_anchor(db, plant, kpi, anchor_cache)
     noise = _rng(plant.id, kpi.code, shift.code if shift else "all", d.isoformat()).uniform(-0.35, 0.35)
 
     if anchor is None:
@@ -149,12 +165,17 @@ def _value_for_date(db: Session, plant: Plant, kpi: Kpi, shift: Shift | None, d:
     return round(expected + noise, 2)
 
 
-def kpi_daily_series(db: Session, plant: Plant, kpi: Kpi, shift: Shift | None, start: date, end: date) -> list[dict]:
+def kpi_daily_series(
+    db: Session, plant: Plant, kpi: Kpi, shift: Shift | None, start: date, end: date, anchor_cache: dict | None = None,
+    active_shifts: Sequence[Shift] | None = None,
+) -> list[dict]:
     target = float(kpi.default_target_value)
+    if anchor_cache is None:
+        anchor_cache = {}
     points = []
     d = start
     while d <= end:
-        value = _value_for_date(db, plant, kpi, shift, d)
+        value = _value_for_date(db, plant, kpi, shift, d, anchor_cache, active_shifts)
         points.append(
             {
                 "date": d.isoformat(),
@@ -169,8 +190,11 @@ def kpi_daily_series(db: Session, plant: Plant, kpi: Kpi, shift: Shift | None, s
     return points
 
 
-def _aggregate(db: Session, plant: Plant, kpi: Kpi, shift: Shift | None, start: date, end: date) -> float:
-    series = kpi_daily_series(db, plant, kpi, shift, start, end)
+def period_average(
+    db: Session, plant: Plant, kpi: Kpi, shift: Shift | None, start: date, end: date, anchor_cache: dict | None = None,
+    active_shifts: Sequence[Shift] | None = None,
+) -> float:
+    series = kpi_daily_series(db, plant, kpi, shift, start, end, anchor_cache, active_shifts)
     return round(sum(p["value"] for p in series) / len(series), 2) if series else 0.0
 
 
@@ -189,8 +213,11 @@ class ShiftComparisonResult:
 
 def compare_shifts(db: Session, plant: Plant, kpi: Kpi, start: date, end: date) -> ShiftComparisonResult:
     shifts = list(db.scalars(select(Shift).where(Shift.is_active.is_(True)).order_by(Shift.sequence)))
-    per_shift = {s.code: _aggregate(db, plant, kpi, s, start, end) for s in shifts}
-    plant_average = _aggregate(db, plant, kpi, None, start, end)
+    anchor_cache: dict = {}
+    per_shift = {s.code: period_average(db, plant, kpi, s, start, end, anchor_cache) for s in shifts}
+    # period_average içindeki shift=None yolunun her gün yeniden sorgulaması yerine
+    # yukarıda yüklenen listeyi kullan (bkz. Aşama 4B-2 denetimi).
+    plant_average = period_average(db, plant, kpi, None, start, end, anchor_cache, shifts)
 
     if per_shift:
         worse_is_lower = kpi.success_direction_higher
@@ -228,8 +255,9 @@ def compare_plants(db: Session, factory: Factory, plant: Plant, kpi: Kpi, start:
     rng.shuffle(others)
     peer_plants = others[:peer_limit]
 
-    plant_value = _aggregate(db, plant, kpi, None, start, end)
-    peers = [{"plant_name": p.name, "value": _aggregate(db, p, kpi, None, start, end)} for p in peer_plants]
+    anchor_cache: dict = {}
+    plant_value = period_average(db, plant, kpi, None, start, end, anchor_cache)
+    peers = [{"plant_name": p.name, "value": period_average(db, p, kpi, None, start, end, anchor_cache)} for p in peer_plants]
     all_values = [plant_value] + [p["value"] for p in peers]
     factory_average = round(sum(all_values) / len(all_values), 2)
 
@@ -241,6 +269,29 @@ def compare_plants(db: Session, factory: Factory, plant: Plant, kpi: Kpi, start:
         plant_name=plant.name, plant_value=plant_value, factory_code=factory.code,
         factory_average=factory_average, peers=peers, rank=rank, compared_plant_count=len(all_values),
     )
+
+
+def compare_factories(db: Session, kpi: Kpi, start: date, end: date) -> dict[str, float | None]:
+    factories = list(db.scalars(select(Factory).order_by(Factory.code)))
+    anchor_cache: dict = {}
+    # Bu çağrı için bir kez yüklenip her fabrika/günde kullanılır. Aksi halde
+    # _value_for_date içindeki shift=None dalı aynı sorguyu her gün x fabrika için yineler;
+    # GET /anomalies/{id}/investigation maliyetinin ana kaynağı budur. Yerini aldığı sorguyla
+    # aynı Shift.is_active filtresini kullandığından davranış değişmez.
+    active_shifts = list(db.scalars(select(Shift).where(Shift.is_active.is_(True))))
+    result: dict[str, float | None] = {}
+    for factory in factories:
+        plants = list(
+            db.scalars(
+                select(Plant).where(Plant.factory_id == factory.id, Plant.is_active.is_(True)).order_by(Plant.sequence_number)
+            )
+        )
+        if not plants:
+            result[factory.code] = None
+            continue
+        values = [period_average(db, p, kpi, None, start, end, anchor_cache, active_shifts) for p in plants]
+        result[factory.code] = round(sum(values) / len(values), 2)
+    return result
 
 
 def related_kpi_changes(db: Session, plant: Plant, shift: Shift | None, primary_kpi: Kpi, start: date, end: date) -> list[dict]:
@@ -258,7 +309,8 @@ def related_kpi_changes(db: Session, plant: Plant, shift: Shift | None, primary_
 
     pool = {
         "PLANA_UYUM": ["AGIR_GITME", "INKITA"], "GSF": ["ISKARTA", "AGIR_GITME"],
-        "ISKARTA": ["GSF", "AGIR_GITME"], "INKITA": ["PLANA_UYUM", "ISKARTA"], "AGIR_GITME": ["GSF", "PLANA_UYUM"],
+        "ISKARTA": ["GSF", "AGIR_GITME"], "INKITA": ["PLANA_UYUM", "ISKARTA", "OEE"], "AGIR_GITME": ["GSF", "PLANA_UYUM"],
+        "OEE": ["INKITA", "PLANA_UYUM"],
     }
     rng = _rng("related_kpis", plant.id, primary_kpi.code, start, end)
     results = []
@@ -266,7 +318,7 @@ def related_kpi_changes(db: Session, plant: Plant, shift: Shift | None, primary_
         related = db.scalar(select(Kpi).where(Kpi.code == code))
         if related is None:
             continue
-        value = _aggregate(db, plant, related, shift, start, end)
+        value = period_average(db, plant, related, shift, start, end)
         change = round(rng.uniform(-6.0, 6.0), 1)
         results.append(
             {
@@ -474,6 +526,16 @@ _DEFAULT_ROOT_CAUSE = ("Kesin kök neden doğrulanamadı", "Saha incelemesi ve e
 
 def similar_historical_cases(db: Session, exclude_anomaly_id: UUID, kpi: Kpi | None, anomaly_type: str | None, factory: Factory | None, plant: Plant | None, limit: int = 5) -> list[dict]:
     candidates = list(db.scalars(select(Anomaly).where(Anomaly.id != exclude_anomaly_id)))
+
+    # Scoring sırasında aday başına ve response mapping sırasında sonuç başına db.get()
+    # çağırmak yerine tüm çağrı için tek batch yüklenir. Her adayın fabrikası iki aşamadan
+    # birinde zaten gereklidir (bkz. Aşama 4B-2 denetimi).
+    candidate_plant_ids = {c.plant_id for c in candidates}
+    plants_by_id = (
+        {p.id: p for p in db.scalars(select(Plant).where(Plant.id.in_(candidate_plant_ids)))}
+        if candidate_plant_ids else {}
+    )
+
     scored = []
     for c in candidates:
         score = 0
@@ -484,20 +546,28 @@ def similar_historical_cases(db: Session, exclude_anomaly_id: UUID, kpi: Kpi | N
         if plant is not None and c.plant_id == plant.id:
             score += 2
         elif factory is not None:
-            c_plant = db.get(Plant, c.plant_id)
+            c_plant = plants_by_id.get(c.plant_id)
             if c_plant is not None and c_plant.factory_id == factory.id:
                 score += 1
         if score > 0:
             scored.append((score, c))
 
     scored.sort(key=lambda sc: (sc[0], sc[1].detected_at), reverse=True)
+    top = scored[:limit]
+
+    result_kpi_ids = {c.kpi_id for _, c in top}
+    kpis_by_id = (
+        {k.id: k for k in db.scalars(select(Kpi).where(Kpi.id.in_(result_kpi_ids)))}
+        if result_kpi_ids else {}
+    )
+
     results = []
-    for score, c in scored[:limit]:
+    for score, c in top:
         rng = _rng("historical_case", c.code)
         pool = _ROOT_CAUSE_POOL.get(c.anomaly_type.value, [_DEFAULT_ROOT_CAUSE])
         root_cause, action, outcome = rng.choice(pool)
-        c_plant = db.get(Plant, c.plant_id)
-        c_kpi = db.get(Kpi, c.kpi_id)
+        c_plant = plants_by_id.get(c.plant_id)
+        c_kpi = kpis_by_id.get(c.kpi_id)
         resolved = c.status.value in ("resolved", "closed")
         results.append(
             {

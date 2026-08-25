@@ -1,49 +1,121 @@
-services:
-  postgres:
-    image: postgres:16
-    environment:
-      POSTGRES_USER: ${POSTGRES_USER:-formen}
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-formen}
-      POSTGRES_DB: ${POSTGRES_DB:-formen_takip}
-    # Docker'ın varsayılan 64 MB /dev/shm'i, ~1.3M satırlık performans tablosunda
-    # paralel sorgu worker'ları için yetmiyor ve aralıklı "DiskFull: could not
-    # resize shared memory segment" hatalarına yol açıyor (host diskiyle ilgisi yok).
-    shm_size: 1gb
-    volumes:
-      - formen_pg_data:/var/lib/postgresql/data
-    ports:
-      - "5433:5432"
-    healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-formen}"]
-      interval: 5s
-      timeout: 5s
-      retries: 10
+# Backend ve scheduler aynı Settings'i kullanır; YAML anchor env drift'ini önler.
+x-backend-env: &backend-env
+  # Local fallback POSTGRES_* ile Compose'taki postgres servisine bağlanır.
+  # Harici DB kullanan deployment DATABASE_URL değerini doğrudan vermelidir.
+  DATABASE_URL: ${DATABASE_URL:-postgresql+psycopg://${POSTGRES_USER:-formen}:${POSTGRES_PASSWORD:-formen}@postgres:5432/${POSTGRES_DB:-formen_takip}}
+  CORS_ORIGINS: ${CORS_ORIGINS:-["http://localhost:5173","http://localhost:8080"]}
+  ENVIRONMENT: ${ENVIRONMENT:-production}
+  # APP_DEBUG, host'taki genel DEBUG değişkenleriyle çakışmayı önler.
+  DEBUG: ${APP_DEBUG:-false}
+  # AUTH_BYPASS yalnız development ortamında açılabilir; Settings diğer ortamları reddeder.
+  AUTH_BYPASS: ${AUTH_BYPASS:-false}
+  # Red Hat SSO / Keycloak (OIDC) — backend yalnızca kaynak sunucudur (resource
+  # server), kendi token'ını üretmez. ENVIRONMENT=production olduğu için bu iki
+  # değer boşsa uygulama fail-closed olarak başlamayı reddeder (bkz. app/core/config.py).
+  OIDC_ISSUER_URL: ${OIDC_ISSUER_URL:-}
+  OIDC_AUDIENCE: ${OIDC_AUDIENCE:-}
+  OIDC_JWKS_URI: ${OIDC_JWKS_URI:-}
+  OIDC_USER_ID_CLAIM: ${OIDC_USER_ID_CLAIM:-sub}
+  LLM_ENABLED: ${LLM_ENABLED:-false}
+  LLM_API_KEY: ${LLM_API_KEY:-}
+  LLM_MODEL: ${LLM_MODEL:-gpt-4o-mini}
+  LLM_BASE_URL: ${LLM_BASE_URL:-https://api.openai.com/v1}
+  LLM_TIMEOUT_SECONDS: ${LLM_TIMEOUT_SECONDS:-30}
+  LLM_ANALYSIS_MODE: ${LLM_ANALYSIS_MODE:-single_context}
+  LLM_TOOL_CALLING_ENABLED: ${LLM_TOOL_CALLING_ENABLED:-true}
+  LLM_DEMO_TOOL_CALLING_ENABLED: ${LLM_DEMO_TOOL_CALLING_ENABLED:-true}
+  LLM_MAX_TOOL_CALLS: ${LLM_MAX_TOOL_CALLS:-10}
+  LLM_MAX_ANALYSIS_STEPS: ${LLM_MAX_ANALYSIS_STEPS:-12}
+  LLM_TOOL_TIMEOUT_SECONDS: ${LLM_TOOL_TIMEOUT_SECONDS:-10}
+  LLM_ANALYSIS_TIMEOUT_SECONDS: ${LLM_ANALYSIS_TIMEOUT_SECONDS:-60}
+  LLM_MAX_DATE_RANGE_DAYS: ${LLM_MAX_DATE_RANGE_DAYS:-365}
+  # SAP entegrasyonu (Faz 1'de kullanılmıyor, gelecekteki SAPDataProvider için
+  # yer tutucu) — Settings'te alanlar var ama bu satırlar olmadan .env'e
+  # yazılsalar bile container'a hiç ulaşmıyorlardı (config drift).
+  SAP_BASE_URL: ${SAP_BASE_URL:-}
+  SAP_CLIENT_ID: ${SAP_CLIENT_ID:-}
+  SAP_CLIENT_SECRET: ${SAP_CLIENT_SECRET:-}
+  # Formen aylık rapor storage — varsayılan "local" (bkz. app/core/config.py);
+  # ENVIRONMENT=production olduğu için REPORT_STORAGE_PROVIDER burada "s3" ve
+  # REPORTS_S3_BUCKET dolu VERİLMEDEN backend fail-closed başlamayı reddeder.
+  # IT/DevOps S3+CloudFront'u provizyonladıktan sonra bu değerleri .env'de doldurun.
+  REPORT_STORAGE_PROVIDER: ${REPORT_STORAGE_PROVIDER:-local}
+  AWS_REGION: ${AWS_REGION:-}
+  REPORTS_S3_BUCKET: ${REPORTS_S3_BUCKET:-}
+  LOCAL_REPORT_STORAGE_DIR: ${LOCAL_REPORT_STORAGE_DIR:-.local_reports}
+  CLOUDFRONT_DOMAIN: ${CLOUDFRONT_DOMAIN:-}
+  CLOUDFRONT_KEY_PAIR_ID: ${CLOUDFRONT_KEY_PAIR_ID:-}
+  CLOUDFRONT_PRIVATE_KEY: ${CLOUDFRONT_PRIVATE_KEY:-}
+  REPORT_SIGNED_URL_TTL_SECONDS: ${REPORT_SIGNED_URL_TTL_SECONDS:-300}
+  SMTP_ENABLED: ${SMTP_ENABLED:-false}
+  SMTP_HOST: ${SMTP_HOST:-}
+  SMTP_PORT: ${SMTP_PORT:-587}
+  SMTP_USERNAME: ${SMTP_USERNAME:-}
+  SMTP_PASSWORD: ${SMTP_PASSWORD:-}
+  SMTP_FROM: ${SMTP_FROM:-}
+  SMTP_USE_TLS: ${SMTP_USE_TLS:-true}
+  EMAIL_MAX_RETRY_COUNT: ${EMAIL_MAX_RETRY_COUNT:-5}
+  EMAIL_STALE_CLAIM_TIMEOUT_SECONDS: ${EMAIL_STALE_CLAIM_TIMEOUT_SECONDS:-900}
+  ANOMALY_STALE_CLAIM_TIMEOUT_SECONDS: ${ANOMALY_STALE_CLAIM_TIMEOUT_SECONDS:-600}
 
+services:
   backend:
-    build: ./backend
-    environment:
-      DATABASE_URL: postgresql+psycopg://${POSTGRES_USER:-formen}:${POSTGRES_PASSWORD:-formen}@postgres:5432/${POSTGRES_DB:-formen_takip}
-      JWT_SECRET_KEY: ${JWT_SECRET_KEY:-change-me-in-production}
-      CORS_ORIGINS: '["http://localhost:5173","http://localhost:8080"]'
-      ENVIRONMENT: production
-      DEBUG: "false"
-      LLM_ENABLED: ${LLM_ENABLED:-false}
-      LLM_API_KEY: ${LLM_API_KEY:-}
-      LLM_MODEL: ${LLM_MODEL:-gpt-4o-mini}
-      LLM_BASE_URL: ${LLM_BASE_URL:-https://api.openai.com/v1}
-      LLM_TIMEOUT_SECONDS: ${LLM_TIMEOUT_SECONDS:-30}
-    depends_on:
-      postgres:
-        condition: service_healthy
+    build:
+      context: ./backend
+      target: runtime
+    environment: *backend-env
+    healthcheck:
+      # Readiness, request sunmak için gereken PostgreSQL bağlantısını kontrol eder.
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/health/ready', timeout=3)"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 15s
     ports:
-      - "8000:8000"
+      # Varsayılan bind yalnız aynı host erişimine açıktır.
+      # Ayrı frontend host'u için BACKEND_BIND private ağ adresi olmalı; 0.0.0.0 kullanmayın.
+      - "${BACKEND_BIND:-127.0.0.1}:8000:8000"
+
+  # Aylık rapor/e-posta ve stale-job işleri varsayılan olarak kapalıdır.
+  # Scheduler profile'ı ile açılır:
+  #   docker compose -f docker-compose.yml -f docker-compose.prod.yml --profile scheduler up -d
+  # En fazla tek scheduler instance çalıştırın.
+  scheduler:
+    build:
+      context: ./backend
+      target: scheduler
+    environment:
+      <<: *backend-env
+      # TZ yalnız log zamanını etkiler; cron saatini CRON_TZ sabitler.
+      # Rapor dönemleri app/core/clock.py üzerinden bağımsız hesaplanır.
+      TZ: ${SCHEDULER_TZ:-Europe/Istanbul}
+    profiles: ["scheduler"]
 
   frontend:
-    build: ./frontend
-    depends_on:
-      - backend
+    build:
+      context: ./frontend
+    environment:
+      # Aynı host'ta Compose DNS backend adını çözer. Ayrı host için rebuild
+      # gerekmez; upstream'i doğrudan değiştirin:
+      # BACKEND_UPSTREAM=https://api.internal.company (bkz. default.conf.template).
+      BACKEND_UPSTREAM: ${BACKEND_UPSTREAM:-http://backend:8000}
+      # OIDC ayarları image'a gömülmez; container başlarken /config.js'e yazılır.
+      VITE_OIDC_ISSUER_URL: ${OIDC_ISSUER_URL:-}
+      VITE_OIDC_CLIENT_ID: ${OIDC_CLIENT_ID:-}
+      VITE_OIDC_REDIRECT_URI: ${OIDC_REDIRECT_URI:-http://localhost:8080/auth/callback}
+      VITE_OIDC_POST_LOGOUT_REDIRECT_URI: ${OIDC_POST_LOGOUT_REDIRECT_URI:-http://localhost:8080/login}
+      VITE_OIDC_SCOPE: ${OIDC_SCOPE:-openid profile email}
+      # Yalnız development/demo ortamı içindir.
+      VITE_AUTH_BYPASS: ${VITE_AUTH_BYPASS:-false}
+    healthcheck:
+      # Bazı ortamlarda localhost IPv6'ya çözüldüğü için healthcheck 127.0.0.1 kullanır.
+      test: ["CMD", "wget", "--quiet", "--spider", "http://127.0.0.1:8080/"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
     ports:
-      - "8080:80"
-
-volumes:
-  formen_pg_data:
+      # Varsayılan bind, Caddy/HTTPS bypass edilmesin diye yalnız aynı host'a açıktır.
+      # Ayrı host erişimi gerekiyorsa FRONTEND_BIND private ağ adresi olmalı; 0.0.0.0 kullanmayın.
+      # Non-root Nginx container içinde 8080 portunu dinler.
+      - "${FRONTEND_BIND:-127.0.0.1}:8080:8080"

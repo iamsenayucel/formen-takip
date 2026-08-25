@@ -1,0 +1,83 @@
+# Processed by the official nginx image's built-in entrypoint hook
+# (/docker-entrypoint.d/20-envsubst-on-templates.sh) at container start:
+# envsubst renders this into /etc/nginx/conf.d/default.conf using only the
+# environment variables actually referenced below, so nginx's own $-prefixed
+# variables (e.g. $host, $remote_addr) are left untouched.
+#
+# BACKEND_UPSTREAM makes the backend address a runtime setting instead of a
+# build-time one — same host ("http://backend:8000") or a different server
+# ("https://api.internal.company") without rebuilding this image.
+server {
+    # 8080, not 80: this image runs as a non-root user (nginx-unprivileged
+    # base — see Dockerfile), which can't bind a port below 1024.
+    listen 8080;
+    server_name _;
+    root /usr/share/nginx/html;
+    index index.html;
+
+    # A *static* proxy_pass hostname is resolved once, at nginx startup, and
+    # then cached for the life of the process — if BACKEND_UPSTREAM's DNS
+    # record changes later (a recreated "backend" container gets a new
+    # Compose-network IP, a moved API server gets a new address) nginx keeps
+    # using the stale IP until reloaded, and a name that doesn't resolve yet
+    # at startup crashes the container outright. Routing proxy_pass through a
+    # variable forces per-request resolution via `resolver` instead (cached
+    # only for `valid`), which also means a temporarily-unresolvable backend
+    # returns a 502 rather than preventing nginx from starting at all.
+    resolver 127.0.0.11 valid=30s;
+
+    location /api/ {
+        # No path after the variable: when proxy_pass's target is a
+        # variable, nginx does NOT do its usual "replace the matched
+        # location prefix with the proxy_pass URI" — it passes the original
+        # request URI through unchanged instead. Backend routes already live
+        # under /api/v1/... (see app/api/v1/router.py), i.e. identical to
+        # what the client requested, so passing it through unchanged is
+        # exactly right; adding "/api/" here (as an earlier version of this
+        # file did) silently doubled the prefix into /api/api/v1/... and
+        # 404'd every request — caught by an end-to-end proxy test, not by
+        # nginx -t or a bare 502 check, which both looked fine regardless.
+        set $backend_upstream ${BACKEND_UPSTREAM};
+        proxy_pass $backend_upstream;
+        # proxy_pass's target is a variable, so nginx can't tell at config-parse
+        # time whether BACKEND_UPSTREAM is http:// or https://; these proxy_ssl_*
+        # directives are inert for plain-HTTP upstreams and only take effect when
+        # it's https://. proxy_ssl_server_name defaults to off, meaning nginx
+        # otherwise opens the TLS connection with NO SNI — any upstream TLS
+        # endpoint that selects a certificate/vhost by SNI (a shared load
+        # balancer, another nginx/Caddy doing name-based routing, a corporate
+        # TLS-terminating proxy) then rejects or misroutes the handshake, which
+        # surfaces here as a 502. Enabling it also makes nginx use the upstream
+        # hostname (not IP) for SNI and, if proxy_ssl_verify is turned on, for
+        # certificate verification.
+        proxy_ssl_server_name on;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+    }
+
+    location = /config.js {
+        add_header Cache-Control "no-store";
+    }
+
+    # The HTML shell selects the content-hashed JavaScript bundle. It must be
+    # revalidated after every deployment; otherwise an already-open browser
+    # can keep running a bundle built against the previous API contract.
+    location = /index.html {
+        add_header Cache-Control "no-store, no-cache, must-revalidate";
+        add_header Pragma "no-cache";
+        add_header Expires "0";
+    }
+
+    # Vite asset names contain a content hash, so these files are safe to cache
+    # indefinitely. A new deployment points index.html at a new filename.
+    location /assets/ {
+        add_header Cache-Control "public, max-age=31536000, immutable";
+        try_files $uri =404;
+    }
+
+    location / {
+        try_files $uri $uri/ /index.html;
+    }
+}

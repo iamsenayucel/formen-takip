@@ -1,7 +1,8 @@
 import { useMemo, useState } from "react";
 import { LayoutGrid, Plus, Table2 } from "lucide-react";
 import { Card, EmptyState, ErrorState, LoadingState } from "../components/StateViews";
-import { Pagination } from "../components/Pagination";
+import { PageHeader } from "../components/PageHeader";
+import { LoadMoreButton } from "../components/LoadMoreButton";
 import { MultiSelect } from "../components/FilterBar";
 import { ContributionSummaryStats } from "../components/ContributionSummaryStats";
 import { ContributionWorkCard } from "../components/ContributionWorkCard";
@@ -27,12 +28,10 @@ export function ImprovementWorksPage() {
   const [search, setSearch] = useState("");
   const [foremanQuery, setForemanQuery] = useState("");
   const [foremanName, setForemanName] = useState("");
-  const [page, setPage] = useState(1);
   const [view, setView] = useState<ViewMode>(readStoredView);
   const [formOpen, setFormOpen] = useState(false);
   const [sortBy, setSortBy] = useState<ContributionSortField>("date");
   const [sortDir, setSortDir] = useState<"asc" | "desc">("desc");
-  const pageSize = 12;
 
   function handleSort(field: ContributionSortField) {
     if (sortBy === field) {
@@ -41,14 +40,14 @@ export function ImprovementWorksPage() {
       setSortBy(field);
       setSortDir("asc");
     }
-    setPage(1);
   }
 
   const filterOptions = useFilterOptions();
-  const foremenSearch = useForemen({ search: foremanQuery || undefined, page_size: 6 });
+  const foremenSearch = useForemen({ search: foremanQuery || undefined }, 6);
+  const foremenSearchItems = foremenSearch.data?.pages[0]?.items ?? [];
 
   const plantsForFactory = useMemo(
-    () => (filterOptions.data?.plants ?? []).filter((p) => !filters.factoryIds.length || filters.factoryIds.includes(p.factory_id)),
+    () => (filterOptions.data?.plants ?? []).filter((p) => !filters.factoryIds.length || filters.factoryIds.includes(p.factoryId)),
     [filterOptions.data, filters.factoryIds]
   );
 
@@ -57,10 +56,10 @@ export function ImprovementWorksPage() {
     search: search || undefined,
     sort_by: sortBy,
     sort_dir: sortDir,
-    page,
-    page_size: pageSize,
   };
-  const works = useContributionWorks(params);
+  const works = useContributionWorks(params, 12);
+  const workItems = works.data?.pages.flatMap((p) => p.items) ?? [];
+  const workTotal = works.data?.pages[0]?.pagination.total ?? null;
 
   const activeFilterCount = [
     filters.dateFrom, filters.dateTo, filters.plantIds[0], filters.factoryIds[0], filters.foremanIds[0],
@@ -74,6 +73,20 @@ export function ImprovementWorksPage() {
 
   return (
     <div className="flex flex-col gap-4">
+      <PageHeader
+        title="Operational Impact+"
+        actions={
+          <button
+            onClick={() => setFormOpen(true)}
+            className="flex shrink-0 items-center gap-1.5 rounded-md px-3.5 py-2 text-[13px] font-medium text-white"
+            style={{ background: "var(--primary)" }}
+          >
+            <Plus size={14} strokeWidth={2} />
+            Yeni Çalışma Ekle
+          </button>
+        }
+      />
+
       <ContributionSummaryStats params={{ ...asQueryParams, search: search || undefined }} />
 
       <div className="flex flex-wrap items-center gap-2 rounded-lg p-3" style={{ background: "var(--surface)", border: "1px solid var(--border)" }}>
@@ -120,17 +133,17 @@ export function ImprovementWorksPage() {
             onChange={(e) => { setForemanQuery(e.target.value); setForemanName(""); }}
             className={searchInputClass} style={{ ...searchInputStyle, maxWidth: "10rem" }}
           />
-          {foremanQuery && !foremanName && foremenSearch.data && foremenSearch.data.items.length > 0 && (
+          {foremanQuery && !foremanName && foremenSearchItems.length > 0 && (
             <div className="absolute z-20 mt-1 w-56 rounded-md shadow-lg" style={{ background: "var(--surface)", border: "1px solid var(--border)" }}>
-              {foremenSearch.data.items.map((f) => (
+              {foremenSearchItems.map((f) => (
                 <button
                   key={f.id}
                   type="button"
-                  onClick={() => { setFilters({ foremanIds: [f.id] }); setForemanName(f.full_name); setForemanQuery(""); }}
+                  onClick={() => { setFilters({ foremanIds: [f.id] }); setForemanName(f.fullName); setForemanQuery(""); }}
                   className="block w-full px-2 py-1.5 text-left text-xs hover:bg-[var(--page-bg)]"
                   style={{ color: "var(--text-secondary)" }}
                 >
-                  {f.full_name} — {f.employee_number}
+                  {f.fullName} — {f.employeeNumber}
                 </button>
               ))}
             </div>
@@ -175,23 +188,12 @@ export function ImprovementWorksPage() {
         )}
       </div>
 
-      <div className="flex items-center justify-end">
-        <button
-          onClick={() => setFormOpen(true)}
-          className="flex shrink-0 items-center gap-1.5 rounded-md px-3.5 py-2 text-[13px] font-medium text-white"
-          style={{ background: "var(--accent)" }}
-        >
-          <Plus size={14} strokeWidth={2} />
-          Yeni Çalışma Ekle
-        </button>
-      </div>
-
       <div className="flex items-center justify-between">
         <input
           type="search"
           placeholder="Başlık, açıklama veya formen adına göre ara..."
           value={search}
-          onChange={(e) => { setSearch(e.target.value); setPage(1); }}
+          onChange={(e) => setSearch(e.target.value)}
           className={searchInputClass} style={searchInputStyle}
         />
         <div className="flex gap-1 rounded-md p-0.5" style={{ border: "1px solid var(--border-strong)" }}>
@@ -216,20 +218,27 @@ export function ImprovementWorksPage() {
 
       {works.isLoading && <LoadingState />}
       {works.isError && <ErrorState />}
-      {works.data && works.data.items.length === 0 && <EmptyState message="Seçilen filtrelerle eşleşen çalışma bulunamadı." />}
+      {!works.isLoading && workItems.length === 0 && <EmptyState message="Seçilen filtrelerle eşleşen çalışma bulunamadı." />}
 
-      {works.data && works.data.items.length > 0 && (
+      {workItems.length > 0 && (
         <>
           {view === "card" ? (
             <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-3">
-              {works.data.items.map((w) => <ContributionWorkCard key={w.id} work={w} />)}
+              {workItems.map((w) => <ContributionWorkCard key={w.id} work={w} />)}
             </div>
           ) : (
             <Card>
-              <ContributionWorkTable items={works.data.items} sortBy={sortBy} sortDir={sortDir} onSort={handleSort} />
+              <ContributionWorkTable items={workItems} sortBy={sortBy} sortDir={sortDir} onSort={handleSort} />
             </Card>
           )}
-          <Pagination page={page} pageSize={pageSize} total={works.data.total} onPageChange={setPage} itemLabel="çalışma" />
+          <LoadMoreButton
+            hasMore={!!works.hasNextPage}
+            isFetchingNextPage={works.isFetchingNextPage}
+            onLoadMore={() => works.fetchNextPage()}
+            loadedCount={workItems.length}
+            total={workTotal}
+            itemLabel="çalışma"
+          />
         </>
       )}
 

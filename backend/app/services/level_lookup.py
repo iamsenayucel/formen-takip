@@ -2,7 +2,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.models.kpi import PerformanceLevelRule
-from app.services.kpi_engine import PerformanceLevel
+from app.services.kpi_engine import PerformanceLevel, is_outstanding_performance, resolve_performance_level
 
 
 def get_performance_levels(db: Session) -> list[PerformanceLevel]:
@@ -21,3 +21,9 @@ def level_to_dict(level: PerformanceLevel) -> dict:
         "name": level.name, "description": level.description,
         "color": level.color, "icon": level.icon,
     }
+
+
+def foreman_level_payload(score: float, levels: list[PerformanceLevel]) -> dict:
+    payload = level_to_dict(resolve_performance_level(score, levels))
+    payload["outstanding_performance"] = is_outstanding_performance(score)
+    return payload

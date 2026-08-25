@@ -1,6 +1,14 @@
 from __future__ import annotations
 
-from app.models.enums import ContributionWorkType, OtherGainType, RepeatPeriod, SuccessDirection, TimeUnit
+from app.models.enums import (
+    ContributionWorkType,
+    FinancialGainStatus,
+    ImpactLevel,
+    OtherGainType,
+    RepeatPeriod,
+    SuccessDirection,
+    TimeUnit,
+)
 
 MINUTES_PER_UNIT = {
     TimeUnit.SECOND: 1 / 60,
@@ -27,14 +35,14 @@ GAIN_TYPE_DIRECTION: dict[OtherGainType, SuccessDirection] = {
     OtherGainType.OTHER: SuccessDirection.LOWER_IS_BETTER,
 }
 
-_CAPACITY_BUCKET = {OtherGainType.CAPACITY_INCREASE}
-_REDUCTION_BUCKET = {
+CAPACITY_BUCKET = {OtherGainType.CAPACITY_INCREASE}
+REDUCTION_BUCKET = {
     OtherGainType.DOWNTIME_REDUCTION,
     OtherGainType.GSF_REDUCTION,
     OtherGainType.SCRAP_REDUCTION,
     OtherGainType.SLOW_RUNNING_REDUCTION,
 }
-_QUALITY_SAFETY_ENERGY_BUCKET = {
+QUALITY_SAFETY_ENERGY_BUCKET = {
     OtherGainType.QUALITY_DEFECT_REDUCTION,
     OtherGainType.SAFETY_RISK_REDUCTION,
     OtherGainType.ENERGY_REDUCTION,
@@ -90,21 +98,12 @@ def resolve_highlighted_gain(work, gains: list) -> dict | None:
         if manual is not None:
             return manual
 
-    if work.verified_amount is not None:
+    if work.gain_amount is not None:
         return {
-            "source": "verified_financial",
-            "label": "Doğrulanmış Maddi Kazanç",
-            "value": float(work.verified_amount),
+            "source": "financial",
+            "label": "Maddi Kazanç",
+            "value": float(work.gain_amount),
             "unit": work.currency.value if work.currency else None,
-            "is_verified": True,
-        }
-    if work.estimated_amount is not None:
-        return {
-            "source": "estimated_financial",
-            "label": "Tahmini Maddi Kazanç",
-            "value": float(work.estimated_amount),
-            "unit": work.currency.value if work.currency else None,
-            "is_verified": False,
         }
     if work.monthly_total_saving_minutes is not None:
         return {
@@ -112,13 +111,12 @@ def resolve_highlighted_gain(work, gains: list) -> dict | None:
             "label": "Aylık Zaman Kazancı",
             "value": float(work.monthly_total_saving_minutes),
             "unit": "dakika",
-            "is_verified": False,
         }
 
     for bucket, label in (
-        (_CAPACITY_BUCKET, None),
-        (_REDUCTION_BUCKET, None),
-        (_QUALITY_SAFETY_ENERGY_BUCKET, None),
+        (CAPACITY_BUCKET, None),
+        (REDUCTION_BUCKET, None),
+        (QUALITY_SAFETY_ENERGY_BUCKET, None),
     ):
         candidate = _best_gain_in_bucket(gains, bucket)
         if candidate is not None:
@@ -130,20 +128,15 @@ def resolve_highlighted_gain(work, gains: list) -> dict | None:
 
 def _resolve_manual_ref(work, gains: list) -> dict | None:
     ref = work.highlighted_gain_ref
-    if ref == "verified_financial" and work.verified_amount is not None:
+    if ref == "financial" and work.gain_amount is not None:
         return {
-            "source": "verified_financial", "label": "Doğrulanmış Maddi Kazanç",
-            "value": float(work.verified_amount), "unit": work.currency.value if work.currency else None, "is_verified": True,
-        }
-    if ref == "estimated_financial" and work.estimated_amount is not None:
-        return {
-            "source": "estimated_financial", "label": "Tahmini Maddi Kazanç",
-            "value": float(work.estimated_amount), "unit": work.currency.value if work.currency else None, "is_verified": False,
+            "source": "financial", "label": "Maddi Kazanç",
+            "value": float(work.gain_amount), "unit": work.currency.value if work.currency else None,
         }
     if ref == "time_saving" and work.monthly_total_saving_minutes is not None:
         return {
             "source": "time_saving", "label": "Aylık Zaman Kazancı",
-            "value": float(work.monthly_total_saving_minutes), "unit": "dakika", "is_verified": False,
+            "value": float(work.monthly_total_saving_minutes), "unit": "dakika",
         }
     if ref.startswith("gain:"):
         gain_id = ref.split(":", 1)[1]
@@ -154,7 +147,7 @@ def _resolve_manual_ref(work, gains: list) -> dict | None:
                 return {
                     "source": f"gain:{g.id}", "label": gain_type_label(g.gain_type),
                     "value": float(value) if value is not None else None,
-                    "unit": "%" if percent is not None else g.unit, "is_verified": False,
+                    "unit": "%" if percent is not None else g.unit,
                 }
     return None
 
@@ -193,8 +186,6 @@ def gain_type_label(gain_type: OtherGainType) -> str:
 
 def resolve_badges(work) -> list[str]:
     badges: list[str] = []
-    if work.is_gain_verified:
-        badges.append("Doğrulanmış Kazanç")
     if work.impact_level and work.impact_level.value == "high":
         badges.append("Yüksek Etki")
     if work.is_standardized:
@@ -205,14 +196,87 @@ def resolve_badges(work) -> list[str]:
         badges.append("Diğer Tesislere Uygulanabilir")
     if work.work_instruction_updated:
         badges.append("İş Talimatı Güncellendi")
-    if work.is_gain_verified and work.verified_by_department and work.verified_by_department.value == "finance":
-        badges.append("Finans Tarafından Doğrulandı")
     return badges
+
+
+_IMPACT_LEVEL_POINTS = {ImpactLevel.LOW: 0, ImpactLevel.MEDIUM: 2, ImpactLevel.HIGH: 4}
+
+CONTRIBUTION_SCORE_LABELS = {
+    1: "Düşük Operational Impact+",
+    2: "Orta-Düşük Operational Impact+",
+    3: "Orta Operational Impact+",
+    4: "Yüksek Operational Impact+",
+    5: "Çok Yüksek Operational Impact+",
+}
+
+_SCORE_BIN_THRESHOLDS = [(11, 5), (8, 4), (5, 3), (2, 2), (0, 1)]
+
+
+def _bin_score(raw_points: int) -> int:
+    for threshold, score in _SCORE_BIN_THRESHOLDS:
+        if raw_points >= threshold:
+            return score
+    return 1
+
+
+def compute_contribution_score(work, gains: list) -> tuple[int, list[dict]]:
+    breakdown: list[dict] = []
+    total = 0
+
+    impact_points = _IMPACT_LEVEL_POINTS.get(work.impact_level, 0) if work.impact_level else 0
+    total += impact_points
+    breakdown.append({
+        "label": "Etki Düzeyi",
+        "points": impact_points,
+        "detail": f"Etki seviyesi: {work.impact_level.value}" if work.impact_level else "Etki seviyesi belirtilmemiş",
+    })
+
+    scope_points = 2 if work.is_applicable_other_plants else 0
+    total += scope_points
+    breakdown.append({
+        "label": "Kapsam",
+        "points": scope_points,
+        "detail": "Diğer tesislere uygulanabilir" if work.is_applicable_other_plants else "Tek tesisle sınırlı",
+    })
+
+    permanence_points = (
+        (2 if work.is_permanent_solution else 0)
+        + (1 if work.is_standardized else 0)
+        + (1 if work.work_instruction_updated else 0)
+    )
+    total += permanence_points
+    breakdown.append({
+        "label": "Kalıcılık",
+        "points": permanence_points,
+        "detail": ", ".join(
+            label for cond, label in (
+                (work.is_permanent_solution, "Kalıcı çözüm"),
+                (work.is_standardized, "Standartlaştırıldı"),
+                (work.work_instruction_updated, "İş talimatı güncellendi"),
+            ) if cond
+        ) or "Kalıcılık göstergesi yok",
+    })
+
+    has_measurable_outcome = (
+        work.financial_gain_status == FinancialGainStatus.YES
+        or work.monthly_total_saving_minutes is not None
+        or any(g.change_amount is not None or g.change_percent is not None for g in gains)
+    )
+    if has_measurable_outcome:
+        verifiability_points, verifiability_detail = 2, "Ölçülebilir kazanç"
+    else:
+        verifiability_points, verifiability_detail = 0, "Ölçülebilir bir sonuç girilmemiş"
+    total += verifiability_points
+    breakdown.append({"label": "Ölçülebilirlik", "points": verifiability_points, "detail": verifiability_detail})
+
+    score = _bin_score(total)
+    breakdown.append({"label": "Toplam", "points": total, "detail": f"{score}/5 — {CONTRIBUTION_SCORE_LABELS[score]}"})
+    return score, breakdown
 
 
 REQUIRED_FOR_PUBLISH_MESSAGES = {
     "foreman_ids": "En az bir ilgili formen seçilmelidir.",
-    "plant_id": "Tesis seçilmelidir.",
+    "plant_ids": "En az bir tesis seçilmelidir.",
     "work_date": "Çalışma tarihi girilmelidir.",
     "work_type": "Çalışma türü seçilmelidir.",
     "work_type_other_note": "'Diğer' seçildiğinde çalışma türünü açıklayan bir not girilmelidir.",
@@ -230,8 +294,8 @@ def validate_for_publish(data: dict) -> dict[str, str]:
         errors["title"] = REQUIRED_FOR_PUBLISH_MESSAGES["title"]
     if not data.get("foreman_ids"):
         errors["foreman_ids"] = REQUIRED_FOR_PUBLISH_MESSAGES["foreman_ids"]
-    if not data.get("plant_id"):
-        errors["plant_id"] = REQUIRED_FOR_PUBLISH_MESSAGES["plant_id"]
+    if not data.get("plant_ids"):
+        errors["plant_ids"] = REQUIRED_FOR_PUBLISH_MESSAGES["plant_ids"]
     if not data.get("work_date"):
         errors["work_date"] = REQUIRED_FOR_PUBLISH_MESSAGES["work_date"]
     elif data.get("work_date_end") and data["work_date_end"] < data["work_date"]:

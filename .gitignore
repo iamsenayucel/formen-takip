@@ -19,6 +19,11 @@ venv/
 .mypy_cache/
 .ruff_cache/
 
+# Yerel geliştirme rapor storage'ı (REPORT_STORAGE_PROVIDER=local) — yalnızca dev/test
+# scratch, kalıcı storage Private S3'tür (bkz. app/services/storage).
+.local_reports/
+backend/.local_reports/
+
 # --- Node / frontend ---
 node_modules/
 dist/
@@ -34,6 +39,9 @@ npm-debug.log*
 yarn-debug.log*
 yarn-error.log*
 pnpm-debug.log*
+
+# --- Yerel veritabanı yedekleri ---
+*.dump
 
 # --- Editör / IDE ---
 .vscode/*
