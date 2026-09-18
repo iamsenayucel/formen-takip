@@ -3,6 +3,7 @@ import { useLocation, useNavigate, useParams } from "react-router-dom";
 import { CalendarDays, CheckCircle2, ChevronLeft, Download, Factory, Pencil, Trash2 } from "lucide-react";
 import { apiClient } from "../api/client";
 import { useContributionWork, useDeleteContributionWork } from "../api/hooks";
+import { Can } from "../components/Can";
 import { Card, ErrorState, LoadingState } from "../components/StateViews";
 import { BeforeAfterComparison } from "../components/BeforeAfterComparison";
 import { ProblemSolutionResultFlow } from "../components/ProblemSolutionResultFlow";
@@ -109,23 +110,27 @@ export function ImprovementWorkDetailPage() {
               <Download size={13} strokeWidth={2} />
               {downloading ? "İndiriliyor..." : "PDF olarak indir"}
             </button>
-            <button
-              onClick={() => setEditing(true)}
-              className="flex items-center gap-1.5 rounded-md px-3 py-1.5 text-xs font-medium text-white"
-              style={{ background: "var(--accent)" }}
-            >
-              <Pencil size={13} strokeWidth={2} />
-              Düzenle
-            </button>
-            <button
-              onClick={handleDelete}
-              disabled={deleteWork.isPending}
-              className="flex items-center gap-1.5 rounded-md px-3 py-1.5 text-xs font-medium disabled:opacity-50"
-              style={{ border: "1px solid var(--border-strong)", color: "var(--text-secondary)" }}
-            >
-              <Trash2 size={13} strokeWidth={2} />
-              Kaldır
-            </button>
+            <Can permission="operational_impact.contribute">
+              <button
+                onClick={() => setEditing(true)}
+                className="flex items-center gap-1.5 rounded-md px-3 py-1.5 text-xs font-medium text-white"
+                style={{ background: "var(--accent)" }}
+              >
+                <Pencil size={13} strokeWidth={2} />
+                Düzenle
+              </button>
+            </Can>
+            <Can permission="operational_impact.contribute">
+              <button
+                onClick={handleDelete}
+                disabled={deleteWork.isPending}
+                className="flex items-center gap-1.5 rounded-md px-3 py-1.5 text-xs font-medium disabled:opacity-50"
+                style={{ border: "1px solid var(--border-strong)", color: "var(--text-secondary)" }}
+              >
+                <Trash2 size={13} strokeWidth={2} />
+                Kaldır
+              </button>
+            </Can>
           </div>
         </div>
 

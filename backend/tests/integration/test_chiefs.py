@@ -1,6 +1,6 @@
 
 import uuid
-from tests.helpers import legacy_json
+from tests.helpers import legacy_json, unwrap_error, unwrap_page
 from contextlib import contextmanager
 from datetime import date
 
@@ -29,6 +29,20 @@ def _count_queries():
     event.listen(engine, "before_cursor_execute", _on_execute)
     try:
         yield counter
+    finally:
+        event.remove(engine, "before_cursor_execute", _on_execute)
+
+
+@contextmanager
+def _capture_statements():
+    statements = []
+
+    def _on_execute(conn, cursor, statement, parameters, context, executemany):
+        statements.append(statement)
+
+    event.listen(engine, "before_cursor_execute", _on_execute)
+    try:
+        yield statements
     finally:
         event.remove(engine, "before_cursor_execute", _on_execute)
 
@@ -80,11 +94,9 @@ class TestChiefList:
         assert items and all(i["employee_number"].startswith(needle) for i in items)
 
     def test_pagination_matches_full_sorted_slice(self, client, auth_headers):
-        """Python-slice pagination davranışını kilitler.
-
-        N. sayfa, tam sıralı sonucun [start:start+page_size] dilimi olmalıdır; farklı
-        sıralama uygulayabilecek DB LIMIT/OFFSET sonucu olmamalıdır.
-        """
+        """Python-slice pagination'ı kilitler: N. sayfa tam sıralı sonucun
+        [start:start+page_size] dilimi olmalı, farklı sıralama üretebilecek DB
+        LIMIT/OFFSET olmamalı."""
         full = legacy_json(client.get(
             "/api/v1/chiefs",
             params={**PERIOD, "sort_by": "employee_number", "sort_dir": "asc", "limit": 200},
@@ -121,11 +133,8 @@ class TestChiefList:
         assert body["items"][0]["id"] == str(plant.chief_id)
 
     def test_is_active_true_filter_matches_current_seed(self, client, auth_headers, db_session):
-        """Güncel seed verisinde pasif şef yoktur; tüm kayıtlar is_active=True.
-
-        Pasif fixture üretmeden filtrenin kanıtlanabilen tarafını karakterize eder:
-        is_active=true tümü true olan bütün şefleri döndürür.
-        """
+        """Güncel seed verisinde pasif şef yok; tüm kayıtlar is_active=True. Bu test
+        yalnızca is_active=true tarafını karakterize eder, pasif fixture içermez."""
         total_chiefs = db_session.scalar(select(func.count()).select_from(Chief))
         inactive_chiefs = db_session.scalar(select(func.count()).select_from(Chief).where(Chief.is_active.is_(False)))
         assert inactive_chiefs == 0, "Beklenmedik: inactive chief bulundu — bu test artık kontrast durumu da kapsamalı"
@@ -175,11 +184,9 @@ class TestChiefDetail:
         assert client.get(f"/api/v1/chiefs/{uuid.uuid4()}", headers=auth_headers).status_code == 404
 
     def test_query_chief_ids_is_ignored_for_ranking_cohort(self, client, auth_headers, db_session):
-        """resolve_chief_scope ranking cohort öncesinde filters.chief_ids değerini kaldırır.
-
-        Çakışan query chief_ids, path'teki şefin score, company_rank veya company_total
-        değerini değiştirmemelidir.
-        """
+        """resolve_chief_scope, ranking cohort öncesinde filters.chief_ids'i kaldırır.
+        Çakışan query chief_ids, path'teki şefin score/company_rank/company_total
+        değerini değiştirmemeli."""
         chiefs = list(db_session.scalars(select(Chief).order_by(Chief.employee_number)))
         chief, other_chief = chiefs[0], chiefs[1]
         unfiltered = legacy_json(client.get(f"/api/v1/chiefs/{chief.id}", params=PERIOD, headers=auth_headers))
@@ -191,10 +198,8 @@ class TestChiefDetail:
         assert conflicting["company_rank"] == unfiltered["company_rank"]
 
     def test_unrelated_factory_filter_excludes_path_chief_without_404(self, client, auth_headers, db_session):
-        """Path'teki şefi scoring cohort dışında bırakan filtre yine 200 ve sıfır/null score döndürür.
-
-        Entity lookup koşulsuzdur ve filtrelenmiş ranking cohort'tan bağımsızdır; 404 dönmemelidir.
-        """
+        """Path'teki şefi scoring cohort dışında bırakan filtre yine 200 ve sıfır/null
+        score döndürmeli; entity lookup koşulsuzdur, filtrelenmiş cohort'tan bağımsızdır."""
         chief = db_session.scalars(select(Chief).order_by(Chief.employee_number)).first()
         chief_plant = db_session.scalars(select(Plant).where(Plant.chief_id == chief.id)).first()
         other_plant = db_session.scalars(select(Plant).where(Plant.factory_id != chief_plant.factory_id)).first()
@@ -213,11 +218,9 @@ class TestChiefDetail:
         assert body["plants"]
 
     def test_zero_plants_chief_is_a_documented_coverage_gap(self, db_session):
-        """Güncel seed verisindeki her şefin en az bir fabrikası vardır.
-
-        Bu nedenle get_chief içindeki factory=None/factory_rank=None/factory_total=0 dalı
-        fixture eklemeden runtime'da çalıştırılamaz; bilinen coverage sınırıdır.
-        """
+        """Güncel seed verisinde her şefin en az bir fabrikası var; get_chief içindeki
+        factory=None/factory_rank=None/factory_total=0 dalı fixture eklemeden runtime'da
+        tetiklenemez — bilinen coverage sınırı."""
         no_plant_chiefs = set(db_session.scalars(select(Chief.id))) - set(
             db_session.scalars(select(Plant.chief_id).distinct())
         )
@@ -333,11 +336,8 @@ class TestChiefDetail:
 
 
 class TestChiefKpisTrendQueryBaseline:
-    """7A chief_kpis/chief_trend query-count baseline'ı.
-
-    Mevcut `before_cursor_execute` modeliyle ölçülür. 404 short-circuit için yalnızca
-    existence query çalışmasını kilitler; not-found akışı ek iş yapmamalıdır.
-    """
+    """chief_kpis/chief_trend query-count baseline'ı; `before_cursor_execute` ile
+    ölçülür. 404 short-circuit için yalnızca existence query çalışmasını kilitler."""
 
     def test_kpis_query_count_normal_and_unknown(self, client, auth_headers, db_session):
         chief = db_session.scalars(select(Chief).order_by(Chief.employee_number)).first()
@@ -351,7 +351,8 @@ class TestChiefKpisTrendQueryBaseline:
         assert resp.status_code == 404
         unknown_n = counter["n"]
 
-        assert unknown_n == 1, f"404 yolunun varlık kontrolünden sonra kısa devre yapması bekleniyor: {unknown_n}"
+        # +2: get_auth_context (RBAC) her request'te role/scope'u DB'den okur (user_role_assignments get + user_scope_assignments select), 404 kisa devresinden once calisir.
+        assert unknown_n == 3, f"404 yolunun (authz sonrasi) kisa devre yapmasi bekleniyor: {unknown_n}"
         assert normal_n >= unknown_n
 
     def test_trend_query_count_normal_and_unknown(self, client, auth_headers, db_session):
@@ -366,7 +367,8 @@ class TestChiefKpisTrendQueryBaseline:
         assert resp.status_code == 404
         unknown_n = counter["n"]
 
-        assert unknown_n == 1, f"404 yolunun varlık kontrolünden sonra kısa devre yapması bekleniyor: {unknown_n}"
+        # +2: get_auth_context (RBAC) her request'te role/scope'u DB'den okur (user_role_assignments get + user_scope_assignments select), 404 kisa devresinden once calisir.
+        assert unknown_n == 3, f"404 yolunun (authz sonrasi) kisa devre yapmasi bekleniyor: {unknown_n}"
         assert normal_n >= unknown_n
 
 
@@ -531,7 +533,6 @@ class TestChiefForemanComparison:
             assert "total_score" in foreman
 
     def test_sort_by_total_score_is_score_not_alphabetical(self, client, auth_headers, db_session):
-        """Sıralama anahtarının ad değil sayısal total_score olduğunu kilitler."""
         chief = db_session.scalars(select(Chief).order_by(Chief.employee_number)).first()
         resp = client.get(f"/api/v1/chiefs/{chief.id}/foreman-comparison", params=PERIOD, headers=auth_headers)
         body = legacy_json(resp)
@@ -540,11 +541,8 @@ class TestChiefForemanComparison:
 
 
 class TestChiefsHeavyTripleQueryBaseline:
-    """7B list/detail/foremen query-count invariant'larını kilitler.
-
-    Kırılgan sabit sayı yerine her migration gate'inde doğrudan ölçüm kullanılır; ilgisiz
-    seed değişiklikleri testi geçersiz kılmamalıdır.
-    """
+    """list/detail/foremen query-count invariant'larını kilitler. Kırılgan sabit sayı
+    yerine doğrudan ölçüm kullanılır; ilgisiz seed değişiklikleri testi geçersiz kılmamalı."""
 
     def test_list_query_count_is_flat_across_page_sizes(self, client, auth_headers):
         counts = {}
@@ -579,7 +577,8 @@ class TestChiefsHeavyTripleQueryBaseline:
         assert resp.status_code == 200
         filtered_n = counter["n"]
 
-        assert unknown_n == 1, f"404 yolu kısa devre yapmalı: {unknown_n}"
+        # +2: get_auth_context (RBAC) sabit ek yuku, bkz. yukaridaki not.
+        assert unknown_n == 3, f"404 yolu (authz sonrasi) kisa devre yapmali: {unknown_n}"
         assert normal_n == filtered_n, f"Filtrelenmiş ve normal sorgu şekli aynı olmalı: {normal_n} vs {filtered_n}"
 
     def test_foremen_query_count_normal_unknown_empty(self, client, auth_headers, db_session):
@@ -600,7 +599,8 @@ class TestChiefsHeavyTripleQueryBaseline:
         assert resp.status_code == 200
         empty_n = counter["n"]
 
-        assert unknown_n == 1, f"404 yolu kısa devre yapmalı: {unknown_n}"
+        # +2: get_auth_context (RBAC) sabit ek yuku, bkz. yukaridaki not.
+        assert unknown_n == 3, f"404 yolu (authz sonrasi) kisa devre yapmali: {unknown_n}"
         assert normal_n >= empty_n >= unknown_n
 
 
@@ -628,3 +628,52 @@ class TestChiefPlantConsistency:
             foremen_by_chief.setdefault(a.chief_id, set()).add(a.foreman_id)
         assert foremen_by_chief
         assert all(len(foreman_ids) > 1 for foreman_ids in foremen_by_chief.values())
+
+
+class TestChiefListDbSideCursorPagination:
+    def test_list_query_is_limited_in_sql(self, client, auth_headers):
+        with _capture_statements() as statements:
+            resp = client.get("/api/v1/chiefs", params={**PERIOD, "limit": 3}, headers=auth_headers)
+        assert resp.status_code == 200
+        matching = [s for s in statements if "chiefs" in s and "LIMIT" in s.upper()]
+        assert matching
+
+    def test_pagination_continues_without_duplicates(self, client, auth_headers):
+        first = client.get("/api/v1/chiefs", params={**PERIOD, "limit": 3}, headers=auth_headers)
+        items1, pagination1 = unwrap_page(first)
+        assert len(items1) == 3
+        assert pagination1["hasMore"] is True
+        cursor = pagination1["nextCursor"]
+        assert cursor
+
+        second = client.get(
+            "/api/v1/chiefs", params={**PERIOD, "limit": 3, "cursor": cursor}, headers=auth_headers
+        )
+        assert second.status_code == 200
+        items2, _ = unwrap_page(second)
+        ids1 = {i["id"] for i in items1}
+        ids2 = {i["id"] for i in items2}
+        assert ids1.isdisjoint(ids2)
+
+    def test_invalid_cursor_on_sort_mismatch(self, client, auth_headers):
+        first = client.get(
+            "/api/v1/chiefs",
+            params={**PERIOD, "limit": 2, "sort_by": "name", "sort_dir": "asc"},
+            headers=auth_headers,
+        )
+        _, pagination = unwrap_page(first)
+        cursor = pagination["nextCursor"]
+        assert cursor
+
+        mismatch = client.get(
+            "/api/v1/chiefs",
+            params={**PERIOD, "limit": 2, "sort_by": "employee_number", "sort_dir": "asc", "cursor": cursor},
+            headers=auth_headers,
+        )
+        assert mismatch.status_code == 400
+        assert unwrap_error(mismatch)["code"] == "INVALID_CURSOR"
+
+    def test_malformed_cursor_returns_invalid_cursor(self, client, auth_headers):
+        resp = client.get("/api/v1/chiefs", params={**PERIOD, "cursor": "not-a-real-cursor"}, headers=auth_headers)
+        assert resp.status_code == 400
+        assert unwrap_error(resp)["code"] == "INVALID_CURSOR"

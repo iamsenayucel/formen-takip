@@ -3,15 +3,14 @@ import { useEffect, useRef } from "react";
 const FOCUSABLE_SELECTOR =
   'a[href], button:not([disabled]), textarea:not([disabled]), input:not([disabled]), select:not([disabled]), [tabindex]:not([tabindex="-1"])';
 
-// Escape-to-close, açılışta odağı diyaloğa taşıma, kapanışta tetikleyici öğeye
-// geri döndürme ve Tab döngüsünü diyalog içinde tutma — Phase 1/2'de dokunulmayan
-// ama Phase 3 kapsamındaki modallar (ShiftAnomalyDetailModal, ContributionWorkForm) için ortak.
+// Ortak focus-trap: Escape kapatır, açılışta odak diyaloğa taşınır, kapanışta
+// tetikleyiciye döner, Tab diyalog içinde döngü yapar. ShiftAnomalyDetailModal
+// ve ContributionWorkForm kullanır.
 export function useModalA11y(onClose: () => void) {
   const containerRef = useRef<HTMLDivElement>(null);
   const triggerRef = useRef<HTMLElement | null>(null);
-  // Aşağıdaki effect yalnızca mount sırasında listener ekler ve odağı yönetir.
-  // onClose her render'da ref üzerinden yeniden yakalanır; Escape stale closure yerine
-  // çağıranın en güncel closure'ını (ör. kapsadığı "dirty" flag) görür.
+  // onClose ref üzerinden tutulur ki Escape handler'ı stale closure yerine
+  // her zaman çağıranın güncel closure'ını görsün.
   const onCloseRef = useRef(onClose);
   onCloseRef.current = onClose;
 

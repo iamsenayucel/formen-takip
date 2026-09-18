@@ -53,12 +53,45 @@
   ],
   "users": [
     {
+      "id": "dev-user",
       "username": "dev-user",
       "enabled": true,
       "emailVerified": true,
       "email": "dev-user@formen-dev.local",
       "firstName": "Dev",
       "lastName": "User",
+      "credentials": [
+        {
+          "type": "password",
+          "value": "DevPass123!",
+          "temporary": false
+        }
+      ]
+    },
+    {
+      "id": "sef-demo-user",
+      "username": "sef-demo",
+      "enabled": true,
+      "emailVerified": true,
+      "email": "sef-demo@formen-dev.local",
+      "firstName": "Şef",
+      "lastName": "Demo",
+      "credentials": [
+        {
+          "type": "password",
+          "value": "DevPass123!",
+          "temporary": false
+        }
+      ]
+    },
+    {
+      "id": "formen-demo-user",
+      "username": "formen-demo",
+      "enabled": true,
+      "emailVerified": true,
+      "email": "formen-demo@formen-dev.local",
+      "firstName": "Formen",
+      "lastName": "Demo",
       "credentials": [
         {
           "type": "password",

@@ -11,7 +11,8 @@ from app.api.deps import _DEV_BYPASS_SUBJECT
 from app.core.config import get_settings
 from app.db.session import get_db
 from app.main import app
-from app.models.enums import ReportType
+from app.models.authorization import UserRoleAssignment, UserScopeAssignment
+from app.models.enums import ReportType, Role, ScopeType
 from app.models.report import ReportExport
 from app.models.user import AuditLog
 from app.services.reporting import _BUILDERS
@@ -59,6 +60,17 @@ class RecordingSession:
         self.events.append("refresh")
         if self.fail_on_refresh:
             raise RuntimeError("test-refresh-failure")
+
+    # get_auth_context (RBAC), bu fake session'ı da get_db üzerinden kullanır — bu
+    # orkestrasyon testleri tam yetkili bir OPERATIONS_MANAGER/ALL scope varsayar,
+    # yetkilendirme mekanizmasının kendisini değil rapor üretim akışını test eder.
+    def get(self, model, pk):
+        if model is UserRoleAssignment:
+            return UserRoleAssignment(subject=pk, role=Role.OPERATIONS_MANAGER)
+        return None
+
+    def scalars(self, stmt):
+        return [UserScopeAssignment(subject=TEST_SUBJECT, scope_type=ScopeType.ALL)]
 
 
 @contextmanager
@@ -166,7 +178,7 @@ class TestReportGenerateOrchestration:
         assert len(fake.audit_logs) == 1
         audit = fake.audit_logs[0]
         assert audit.subject == _expected_authenticated_subject()
-        assert audit.action == "report_generated"
+        assert audit.action == "report.created"
         assert audit.entity == "report_export"
         assert audit.new_value == unwrap(resp)["fileName"]
         assert audit.old_value is None

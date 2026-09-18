@@ -97,16 +97,26 @@ def active_foreman_count(
     return db.scalar(query) or 0
 
 
-def active_foreman_counts_by_plant(db: Session, as_of_date: date) -> dict[UUID, int]:
-    query = assignments_as_of(as_of_date, active_foreman_only=True).with_only_columns(
+def active_foreman_counts_by_plant(
+    db: Session, as_of_date: date, *, plant_ids: list[UUID] | None = None
+) -> dict[UUID, int]:
+    query = assignments_as_of(as_of_date, active_foreman_only=True)
+    if plant_ids is not None:
+        query = query.where(ForemanAssignment.plant_id.in_(plant_ids))
+    query = query.with_only_columns(
         ForemanAssignment.plant_id, func.count(func.distinct(ForemanAssignment.foreman_id)),
         maintain_column_froms=True,
     ).group_by(ForemanAssignment.plant_id)
     return dict(db.execute(query).all())
 
 
-def active_foremen_by_chief(db: Session, as_of_date: date) -> dict[UUID, list[tuple[UUID, str]]]:
-    query = assignments_as_of(as_of_date, active_foreman_only=True).with_only_columns(
+def active_foremen_by_chief(
+    db: Session, as_of_date: date, *, chief_ids: list[UUID] | None = None
+) -> dict[UUID, list[tuple[UUID, str]]]:
+    query = assignments_as_of(as_of_date, active_foreman_only=True)
+    if chief_ids is not None:
+        query = query.where(ForemanAssignment.chief_id.in_(chief_ids))
+    query = query.with_only_columns(
         ForemanAssignment.chief_id, Foreman.id, Foreman.first_name, Foreman.last_name,
         maintain_column_froms=True,
     ).distinct()

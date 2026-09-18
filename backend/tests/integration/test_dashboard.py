@@ -148,11 +148,9 @@ class TestDashboardSnapshot:
 
 
 class TestDashboardComparisonCharacterization:
-    """5A kpi-summary, plant-ranking ve shift-comparison karakterizasyonu.
-
-    Değer, sıralama, limit, filtre ve boş veri davranışını kilitler. GET endpoint'leri
-    read-only'dir; fixture gerekmez. Sonuçlar güncel seed'e bağlıdır ve reseed sonrası
-    geçerli olması beklenmez.
+    """kpi-summary, plant-ranking ve shift-comparison karakterizasyonu. Değer, sıralama,
+    limit, filtre ve boş veri davranışını kilitler. Sonuçlar güncel seed'e bağlıdır,
+    reseed sonrası geçerli olmaz.
     """
 
     _PARAMS = {"date_from": "2026-06-27", "date_to": "2026-07-27"}
@@ -230,10 +228,9 @@ class TestDashboardComparisonCharacterization:
 
 
 class TestDashboardForemanCharacterization:
-    """5B foreman-ranking, foreman-trend-ranking ve performance-distribution karakterizasyonu.
-
-    Değer, sıralama, limit, filtre, boş veri ve eksik önceki dönem davranışını kilitler.
-    GET endpoint'leri read-only'dir; değerler güncel seed'e bağlıdır.
+    """foreman-ranking, foreman-trend-ranking ve performance-distribution karakterizasyonu.
+    Değer, sıralama, limit, filtre, boş veri ve eksik önceki dönem davranışını kilitler;
+    değerler güncel seed'e bağlıdır.
     """
 
     _PARAMS = {"date_from": "2026-06-27", "date_to": "2026-07-27"}
@@ -520,11 +517,9 @@ class TestDashboardForemanCharacterization:
         assert all(item["delta"] < 0 for item in items)
 
     def test_foreman_trend_ranking_missing_previous_period_excludes_all(self, client, auth_headers):
-        """Güncel pencere seed verisinin ilk tarihinde başlar; önceki dönem tüm veriden eskidir.
-
-        Bu durumda sentetik previous=0/None fallback yerine inner-join/exclusion nedeniyle
-        boş sonuç dönmesini kilitler.
-        """
+        """Güncel pencere seed verisinin ilk tarihinde başlar; önceki dönem tüm veriden
+        eskidir. Sentetik previous=0/None fallback yerine inner-join/exclusion nedeniyle
+        boş sonuç döner."""
         resp = client.get(
             "/api/v1/dashboard/foreman-trend-ranking", params=self._BOUNDARY_PARAMS, headers=auth_headers
         )
@@ -680,10 +675,8 @@ def _expected_last_sync_at(db_session) -> str | None:
 
 
 class TestDashboardOverviewCharacterization:
-    """5C-1 summary ve snapshot karakterizasyonu.
-
-    Değer, boş veri, filtre ve limit wiring davranışını kilitler. GET akışı read-only,
-    sonuçlar güncel seed'e bağlıdır.
+    """summary ve snapshot karakterizasyonu. Değer, boş veri, filtre ve limit wiring
+    davranışını kilitler; sonuçlar güncel seed'e bağlıdır.
 
     İki mevcut davranış bilerek korunur:
       - `plants_with_missing_data` yalnızca tarih filtresini uygular. Seed içinde MISSING/

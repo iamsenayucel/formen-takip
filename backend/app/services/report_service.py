@@ -6,10 +6,13 @@ from uuid import UUID
 
 from sqlalchemy.orm import Session
 
+from sqlalchemy import select
+
 from app.core import clock
-from app.core.errors import ReportNotFoundError
+from app.core.errors import ForbiddenError, ReportNotFoundError
 from app.core.pagination import decode_cursor, encode_cursor, filter_signature
 from app.models.enums import ReportFormat, ReportStatus
+from app.models.organization import Plant
 from app.models.report import ReportExport
 from app.repositories.report_repository import ReportRepository
 from app.schemas.common import CursorParams, Filters
@@ -32,8 +35,12 @@ class ReportService:
         self.db = db
         self.repository = repository or ReportRepository(db)
 
-    def list_reports(self, page: CursorParams) -> dict:
-        filter_sig = filter_signature()
+    def list_reports(self, page: CursorParams, *, requested_by_subject: str | None = None) -> dict:
+        # `requested_by_subject`: scope-restricted bir kullanıcı (ör. ileride tanıtılabilecek
+        # bölgesel bir Operasyon Yöneticisi varyantı) yalnızca kendi ürettiği raporları görür —
+        # rapor içeriği plant/factory bazlı serbest filtrelerle üretildiğinden (filters_json),
+        # tam org-scope kesişimi yerine "kendi raporların" basit ve güvenli bir varsayılandır.
+        filter_sig = filter_signature(requested_by_subject)
         cursor_value = None
         cursor_id = None
         if page.cursor is not None:
@@ -41,7 +48,10 @@ class ReportService:
             cursor_value = state.sort_value
             cursor_id = UUID(state.id)
 
-        rows = self.repository.list_page(cursor_value=cursor_value, cursor_id=cursor_id, limit=page.limit)
+        rows = self.repository.list_page(
+            cursor_value=cursor_value, cursor_id=cursor_id, limit=page.limit,
+            requested_by_subject=requested_by_subject,
+        )
         has_more = len(rows) > page.limit
         page_rows = rows[: page.limit]
 
@@ -57,7 +67,16 @@ class ReportService:
             "next_cursor": next_cursor, "has_more": has_more,
         }
 
-    def generate_report(self, payload: ReportGenerateRequest, subject: str | None, ip_address: str | None) -> dict:
+    def generate_report(
+        self,
+        payload: ReportGenerateRequest,
+        subject: str | None,
+        ip_address: str | None,
+        *,
+        plant_ids_scope: list[UUID] | None = None,
+    ) -> dict:
+        if plant_ids_scope is not None:
+            self._assert_request_within_scope(payload, plant_ids_scope)
         filters = self._filters_from_request(payload)
         headers, rows = build_report_rows(self.db, payload.report_type, filters)
         title = REPORT_TITLES[payload.report_type]
@@ -85,7 +104,7 @@ class ReportService:
         self.repository.flush()
 
         record_audit(
-            self.db, subject, "report_generated", entity="report_export",
+            self.db, subject, "report.created", entity="report_export",
             new_value=file_name, ip_address=ip_address,
         )
 
@@ -108,13 +127,41 @@ class ReportService:
             chief_ids=payload.chief_ids, shift_ids=payload.shift_ids, kpi_ids=payload.kpi_ids,
         )
 
-    def download_report(self, report_id: UUID, subject: str | None, ip_address: str | None) -> ReportExport:
+    def _expand_factory_ids(self, factory_ids: list) -> set[str]:
+        if not factory_ids:
+            return set()
+        return {str(pid) for pid in self.db.scalars(select(Plant.id).where(Plant.factory_id.in_(factory_ids)))}
+
+    def _assert_request_within_scope(self, payload: ReportGenerateRequest, plant_ids_scope: list[UUID]) -> None:
+        scope = {str(v) for v in plant_ids_scope}
+        requested_plant_ids = {str(v) for v in (payload.plant_ids or [])}
+        requested_plant_ids |= self._expand_factory_ids(payload.factory_ids or [])
+        if not requested_plant_ids:
+            raise ForbiddenError(
+                "Erişim kapsamınız kısıtlı olduğu için filtresiz (şirket geneli) rapor oluşturamazsınız."
+            )
+        if not requested_plant_ids.issubset(scope):
+            raise ForbiddenError("İstenen tesislerden bir veya daha fazlası erişim kapsamınız dışında.")
+
+    def _assert_export_within_scope(self, export: ReportExport, plant_ids_scope: list[UUID]) -> None:
+        scope = {str(v) for v in plant_ids_scope}
+        stored = export.filters_json or {}
+        report_plant_ids = {str(v) for v in (stored.get("plant_ids") or [])}
+        report_plant_ids |= self._expand_factory_ids(stored.get("factory_ids") or [])
+        if not report_plant_ids or not report_plant_ids.issubset(scope):
+            raise ForbiddenError("Bu rapor erişim kapsamınız dışında.")
+
+    def download_report(
+        self, report_id: UUID, subject: str | None, ip_address: str | None, *, plant_ids_scope: list[UUID] | None = None,
+    ) -> ReportExport:
         export = self.repository.get(report_id)
         if export is None:
             raise ReportNotFoundError("Rapor bulunamadı.")
+        if plant_ids_scope is not None:
+            self._assert_export_within_scope(export, plant_ids_scope)
 
         record_audit(
-            self.db, subject, "report_downloaded", entity="report_export",
+            self.db, subject, "report.downloaded", entity="report_export",
             new_value=export.file_name, ip_address=ip_address,
         )
         self.db.commit()

@@ -1,12 +1,14 @@
 from __future__ import annotations
 
+from dataclasses import replace
 from uuid import UUID
 
 from sqlalchemy.orm import Session
 
 from app.core.errors import PlantNotFoundError
-from app.core.pagination import filter_signature, paginate_in_memory
+from app.core.pagination import decode_cursor, encode_cursor, filter_signature
 from app.core.turkish import turkish_sort_key
+from app.models.organization import Plant
 from app.repositories.foreman_repository import ForemanRepository
 from app.repositories.plant_repository import PlantRepository
 from app.schemas.common import CursorParams, Filters
@@ -15,6 +17,8 @@ from app.services.chief_service import chief_group_code
 from app.services.foreman_performance_metrics import compute_general_foreman_scores
 from app.services.kpi_engine import resolve_performance_level
 from app.services.level_lookup import foreman_level_payload, get_performance_levels, level_to_dict
+
+_COMPUTED_SORT_FIELDS = {"active_foreman_count", "score", "level"}
 
 
 class PlantService:
@@ -107,17 +111,77 @@ class PlantService:
         filters: Filters,
     ) -> dict:
         levels = get_performance_levels(self.db)
-        all_plants = self.repository.list_filtered(search, factory_id, is_active, filters)
-        scores_by_plant = {s.key: s for s in analytics.plant_scores(self.db, filters)}
+
+        filter_sig = filter_signature(
+            search, factory_id, is_active,
+            filters.date_from, filters.date_to, filters.plant_ids, filters.factory_ids,
+            filters.chief_ids, filters.shift_ids, filters.kpi_ids, filters.foreman_ids,
+        )
+        cursor_value = cursor_id = None
+        if page.cursor is not None:
+            state = decode_cursor(page.cursor, sort_by=sort_by, sort_dir=sort_dir, filter_sig=filter_sig)
+            cursor_value = state.sort_value
+            cursor_id = UUID(state.id)
+
+        sort_values = None
+        if sort_by in _COMPUTED_SORT_FIELDS:
+            candidate_ids = self.repository.list_ids(search, factory_id, is_active, filters)
+            if sort_by == "active_foreman_count":
+                counts = assignment_resolver.active_foreman_counts_by_plant(
+                    self.db, filters.date_to, plant_ids=candidate_ids
+                )
+                sort_values = {pid: counts.get(pid, 0) for pid in candidate_ids}
+            else:
+                scores_by_id = {s.key: s.total_score for s in analytics.plant_scores(self.db, filters)}
+                if sort_by == "score":
+                    sort_values = {pid: scores_by_id.get(pid, 0.0) for pid in candidate_ids}
+                else:
+                    sort_values = {
+                        pid: resolve_performance_level(scores_by_id.get(pid, 0.0), levels).sort_order
+                        for pid in candidate_ids
+                    }
+
+        rows = self.repository.list_page(
+            search, factory_id, is_active, filters,
+            sort_by=sort_by, sort_dir=sort_dir, sort_values=sort_values,
+            cursor_value=cursor_value, cursor_id=cursor_id, limit=page.limit,
+        )
+        has_more = len(rows) > page.limit
+        page_rows = rows[: page.limit]
+        page_plants = [p for p, _ in page_rows]
+
+        total = self.repository.count(search, factory_id, is_active, filters)
+        items = self._hydrate_plant_items(page_plants, filters, levels)
+
+        next_cursor = None
+        if has_more and page_rows:
+            last_plant, last_sort_value = page_rows[-1]
+            next_cursor = encode_cursor(
+                sort_by=sort_by, sort_dir=sort_dir, filter_sig=filter_sig,
+                sort_value=last_sort_value, id_=str(last_plant.id),
+            )
+        return {"items": items, "next_cursor": next_cursor, "has_more": has_more, "total": total}
+
+    def _hydrate_plant_items(self, page_plants: list[Plant], filters: Filters, levels) -> list[dict]:
+        if not page_plants:
+            return []
+        page_ids = [p.id for p in page_plants]
+        page_filters = replace(filters, plant_ids=page_ids)
+        scores_by_plant = {s.key: s for s in analytics.plant_scores(self.db, page_filters)}
         factories_by_id = self.repository.all_factories_by_id()
-        active_foreman_counts = assignment_resolver.active_foreman_counts_by_plant(self.db, filters.date_to)
+        active_foreman_counts = assignment_resolver.active_foreman_counts_by_plant(
+            self.db, filters.date_to, plant_ids=page_ids
+        )
 
-        chiefs_by_id = {c.id: c for c in self.repository.chiefs_by_ids(list({p.chief_id for p in all_plants}))}
+        chief_ids = list({p.chief_id for p in page_plants})
+        chiefs_by_id = {c.id: c for c in self.repository.chiefs_by_ids(chief_ids)}
         scores_by_chief = {s.key: s for s in analytics.chief_scores(self.db, filters)}
-        foremen_by_chief = assignment_resolver.active_foremen_by_chief(self.db, filters.date_to)
+        foremen_by_chief = assignment_resolver.active_foremen_by_chief(
+            self.db, filters.date_to, chief_ids=chief_ids
+        )
 
-        full_items = []
-        for p in all_plants:
+        items = []
+        for p in page_plants:
             gs = scores_by_plant.get(p.id)
             score = gs.total_score if gs else 0.0
             active_foremen = active_foreman_counts.get(p.id, 0)
@@ -141,7 +205,7 @@ class PlantService:
                 }
                 if chief else None
             )
-            full_items.append(
+            items.append(
                 {
                     "id": str(p.id), "code": p.code, "name": p.name, "sequence_number": p.sequence_number,
                     "factory": {"id": str(factory.id), "code": factory.code, "name": factory.name} if factory else None,
@@ -150,33 +214,9 @@ class PlantService:
                     "active_foreman_count": active_foremen,
                     "record_count": gs.record_count if gs else 0,
                     "group": group,
-                    "_sort": {
-                        "sequence": p.sequence_number,
-                        "name": turkish_sort_key(p.name),
-                        "factory": turkish_sort_key(factory.name) if factory else (),
-                        "active_foreman_count": active_foremen,
-                        "score": score,
-                        "level": level.sort_order,
-                    },
                 }
             )
-
-        reverse = sort_dir == "desc"
-        full_items.sort(key=lambda it: (it["_sort"][sort_by], it["id"]), reverse=reverse)
-        for it in full_items:
-            del it["_sort"]
-
-        total = len(full_items)
-        filter_sig = filter_signature(
-            search, factory_id, is_active,
-            filters.date_from, filters.date_to, filters.plant_ids, filters.factory_ids,
-            filters.chief_ids, filters.shift_ids, filters.kpi_ids, filters.foreman_ids,
-        )
-        items, next_cursor, has_more = paginate_in_memory(
-            full_items, id_key="id", cursor=page.cursor, limit=page.limit,
-            sort_by=sort_by, sort_dir=sort_dir, filter_sig=filter_sig,
-        )
-        return {"items": items, "next_cursor": next_cursor, "has_more": has_more, "total": total}
+        return items
 
     def get_summary(self, plant_id: UUID, filters: Filters) -> dict:
         plant = self.repository.get(plant_id)
@@ -226,36 +266,46 @@ class PlantService:
         filters.plant_ids = [plant_id]
         levels = get_performance_levels(self.db)
         scores, bonuses_by_foreman, general_by_key = compute_general_foreman_scores(self.db, filters)
-        foreman_ids = [s.key for s in scores]
-        foremen_by_id = self.foreman_repository.foremen_by_ids(foreman_ids)
+        scores_by_foreman = {s.key: s for s in scores}
 
-        full_items = [
-            {
-                "id": str(s.key),
-                "foreman_id": str(s.key),
-                "employee_number": foremen_by_id[s.key].employee_number if s.key in foremen_by_id else None,
-                "full_name": (
-                    f"{foremen_by_id[s.key].first_name} {foremen_by_id[s.key].last_name}"
-                    if s.key in foremen_by_id else None
-                ),
-                "operational_score": round(s.total_score, 2),
-                "contribution_bonus": bonuses_by_foreman[s.key].bonus if s.key in bonuses_by_foreman else 0,
-                "general_performance_score": round(general_by_key[s.key], 2),
-                "level": foreman_level_payload(general_by_key[s.key], levels),
-            }
-            for s in scores
-        ]
-        full_items.sort(key=lambda it: (it["general_performance_score"], it["id"]), reverse=True)
-
-        total = len(full_items)
         filter_sig = filter_signature(
             str(plant_id), filters.date_from, filters.date_to, filters.plant_ids, filters.factory_ids,
             filters.chief_ids, filters.shift_ids, filters.kpi_ids, filters.foreman_ids,
         )
-        items, next_cursor, has_more = paginate_in_memory(
-            full_items, id_key="id", cursor=page.cursor, limit=page.limit,
-            sort_by="general_performance_score", sort_dir="desc", filter_sig=filter_sig,
+        cursor_value = cursor_id = None
+        if page.cursor is not None:
+            state = decode_cursor(
+                page.cursor, sort_by="general_performance_score", sort_dir="desc", filter_sig=filter_sig
+            )
+            cursor_value = state.sort_value
+            cursor_id = UUID(state.id)
+
+        rows = self.foreman_repository.list_by_ids_page(
+            list(general_by_key.keys()), general_by_key,
+            sort_dir="desc", cursor_value=cursor_value, cursor_id=cursor_id, limit=page.limit,
         )
-        for it in items:
-            del it["id"]
+        has_more = len(rows) > page.limit
+        page_rows = rows[: page.limit]
+
+        items = [
+            {
+                "foreman_id": str(f.id),
+                "employee_number": f.employee_number,
+                "full_name": f"{f.first_name} {f.last_name}",
+                "operational_score": round(scores_by_foreman[f.id].total_score, 2) if f.id in scores_by_foreman else 0.0,
+                "contribution_bonus": bonuses_by_foreman[f.id].bonus if f.id in bonuses_by_foreman else 0,
+                "general_performance_score": round(general_by_key[f.id], 2),
+                "level": foreman_level_payload(general_by_key[f.id], levels),
+            }
+            for f, _ in page_rows
+        ]
+
+        total = len(general_by_key)
+        next_cursor = None
+        if has_more and page_rows:
+            last_foreman, last_sort_value = page_rows[-1]
+            next_cursor = encode_cursor(
+                sort_by="general_performance_score", sort_dir="desc", filter_sig=filter_sig,
+                sort_value=last_sort_value, id_=str(last_foreman.id),
+            )
         return {"items": items, "next_cursor": next_cursor, "has_more": has_more, "total": total}

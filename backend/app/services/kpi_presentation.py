@@ -1,20 +1,11 @@
 """KPI-koduna özel sunum (presentation) mantığı — AGIR_GITME / INKITA / PLANA_UYUM.
 
-Bu modül tamamen saftır: DB'ye erişmez, `Session` almaz, FastAPI import etmez,
-`HTTPException` fırlatmaz, repository çağırmaz, transaction yönetmez. Yalnızca
-zaten hesaplanmış primitif değerleri (avg_actual, planned_qty, actual_qty vb.)
-alıp kullanıcıya gösterilecek presentation alanlarını üretir.
+Saf modül: DB/Session/FastAPI'ye bağımlı değildir, yalnızca zaten hesaplanmış
+primitif değerleri presentation alanlarına dönüştürür. Skorlama `kpi_engine.py`'nin
+sorumluluğudur, burada tekrar edilmez.
 
-Skorlama (hangi puan verilir?) `kpi_engine.py`'nin sorumluluğudur ve bu modülde
-tekrar edilmez — burada yalnızca zaten hesaplanmış değerlerin nasıl açıklanacağı
-(yön, sapma, dahil/hariç bileşenler) belirlenir.
-
-İki farklı çağıran bağlamı desteklenir ve birbirine zorla dönüştürülmez:
-  * dönem/period bağlamı (GET /foremen/{id}/kpis) — aggregate `avg_actual` değerleri
-  * tek-kayıt bağlamı (calculation-detail) — ham `numerator_value`/`denominator_value`
-
-Bu iki bağlamın PLANA_UYUM için farklı alan adları kullanması (`direction` vs
-`status`) kasıtlı olarak korunur — API standardizasyonu bu modülün amacı değildir.
+PLANA_UYUM için dönem (`direction`) ve tek-kayıt (`status`) bağlamları kasıtlı
+olarak farklı alan adı kullanır — bu iki bağlam zorla aynılaştırılmaz.
 """
 
 
@@ -32,8 +23,8 @@ def agir_gitme_presentation(avg_actual: float, avg_target: float | None, decimal
 def inkita_presentation(included_total: float | None) -> dict:
     """INKITA için dahil/hariç bileşen açıklaması (yalnızca dönem bağlamında kullanılır).
 
-    `included_total`, çağıranın zaten yuvarladığı avg_actual değeridir — burada
-    tekrar yuvarlama yapılmaz (orijinal davranış: `item["avg_actual"]` aynen kopyalanır).
+    `included_total` çağıranın zaten yuvarladığı avg_actual değeridir — burada tekrar
+    yuvarlanmaz.
     """
     return {
         "included_total": included_total,

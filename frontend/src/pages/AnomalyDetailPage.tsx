@@ -59,7 +59,6 @@ export function AnomalyDetailPage() {
     <div className="flex flex-col gap-4">
       <BackLink label="Tespitler" onClick={() => navigate("/anomalies")} />
 
-      {/* 1-2: Tespit Özeti + Ana KPI Sonucu */}
       <DetectionHero
         anomaly={a}
         statusPending={statusMutation.isPending}
@@ -80,12 +79,10 @@ export function AnomalyDetailPage() {
         </div>
       )}
 
-      {/* 3: Tespit Neden Oluştu? */}
       <Card title="Tespit Neden Oluşturuldu?">
         <DetectionReasonCards anomaly={a} investigation={investigation.data} investigationLoading={investigation.isLoading} />
       </Card>
 
-      {/* 4: KPI Trendi */}
       <Card title="KPI Trendi">
         <KpiTrendInvestigationChart
           points={a.dailyHistory}
@@ -95,14 +92,12 @@ export function AnomalyDetailPage() {
         />
       </Card>
 
-      {/* 5: Karşılaştırma */}
       <Card title="Karşılaştırma">
         {investigation.isLoading && <LoadingState label="Karşılaştırma yükleniyor..." />}
         {investigation.isError && <ErrorState message="Karşılaştırma verisi yüklenemedi." />}
         {investigation.data && <BenchmarkComparison anomaly={a} investigation={investigation.data} />}
       </Card>
 
-      {/* 6: Kapsam ve Sorumluluk */}
       <Card title="Kapsam ve Sorumluluk">
         <div className="flex flex-col gap-5">
           <DetectionScope anomaly={a} />
@@ -113,14 +108,12 @@ export function AnomalyDetailPage() {
         </div>
       </Card>
 
-      {/* 8: İlgili Diğer Sinyaller (yalnızca anlamlı sinyal varsa) */}
       {investigation.data && investigation.data.relatedKpiChanges.length > 0 && (
         <Card title="Aynı Dönemde Dikkat Çeken Diğer Değişimler">
           <RelatedKpiChanges items={investigation.data.relatedKpiChanges} />
         </Card>
       )}
 
-      {/* 9: Operasyonel Etki */}
       <Card title="Operasyonel Etki">
         {investigation.isLoading && <LoadingState label="Yükleniyor..." />}
         {investigation.isError && <ErrorState message="Etki verisi yüklenemedi." />}
@@ -133,7 +126,6 @@ export function AnomalyDetailPage() {
         )}
       </Card>
 
-      {/* 10: Benzer Geçmiş Tespitler */}
       <Card title="Benzer Geçmiş Tespitler">
         {investigation.isLoading && <LoadingState label="Yükleniyor..." />}
         {investigation.isError && <ErrorState message="Benzer tespitler yüklenemedi." />}

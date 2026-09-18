@@ -1,5 +1,6 @@
 import { useState } from "react";
 import { CheckCircle2, Download, FileText, XCircle } from "lucide-react";
+import { Can } from "../components/Can";
 import { Card, EmptyState, ErrorState, LoadingState } from "../components/StateViews";
 import { PageHeader } from "../components/PageHeader";
 import { useFilters } from "../hooks/useFilters";
@@ -91,67 +92,71 @@ export function ReportsPage() {
 
       <FilterBar filters={filters} setFilters={setFilters} clearFilters={clearFilters} />
 
-      <Card title="Yeni Rapor Oluştur">
-        <div className="flex flex-wrap items-end gap-3">
-          <div>
-            <label className={labelClass} style={labelStyle}>Rapor Türü</label>
-            <select
-              value={reportType}
-              onChange={(e) => setReportType(e.target.value as ReportType)}
-              className={fieldClass}
-              style={fieldStyle}
-            >
-              {Object.entries(REPORT_TYPE_LABELS).map(([v, l]) => <option key={v} value={v}>{l}</option>)}
-            </select>
-          </div>
-          <div>
-            <label className={labelClass} style={labelStyle}>Format</label>
-            <select
-              value={format}
-              onChange={(e) => setFormat(e.target.value as ReportFormat)}
-              className={fieldClass}
-              style={fieldStyle}
-            >
-              {Object.entries(FORMAT_LABELS).map(([v, l]) => <option key={v} value={v}>{l}</option>)}
-            </select>
-          </div>
-          <button
-            onClick={handleGenerate}
-            disabled={generate.isPending}
-            className="rounded-md px-4 py-2 text-[13px] font-medium text-white disabled:opacity-60"
-            style={{ background: "var(--primary)" }}
-          >
-            {generate.isPending ? "Oluşturuluyor..." : "Rapor Oluştur"}
-          </button>
-        </div>
-
-        {generate.isSuccess && (
-          <div
-            className="mt-3 flex flex-wrap items-center justify-between gap-3 rounded-md p-3"
-            style={{ background: "var(--status-positive-bg)", border: "1px solid var(--status-positive-border)" }}
-          >
-            <p className="text-body flex items-center gap-1.5 font-medium" style={{ color: "var(--status-positive)" }}>
-              <CheckCircle2 size={14} strokeWidth={2} className="shrink-0" />
-              "{generate.data.fileName}" oluşturuldu ({generate.data.rowCount} satır)
-            </p>
+      <Can permission="reports.create">
+        <Card title="Yeni Rapor Oluştur">
+          <div className="flex flex-wrap items-end gap-3">
+            <div>
+              <label className={labelClass} style={labelStyle}>Rapor Türü</label>
+              <select
+                value={reportType}
+                onChange={(e) => setReportType(e.target.value as ReportType)}
+                className={fieldClass}
+                style={fieldStyle}
+              >
+                {Object.entries(REPORT_TYPE_LABELS).map(([v, l]) => <option key={v} value={v}>{l}</option>)}
+              </select>
+            </div>
+            <div>
+              <label className={labelClass} style={labelStyle}>Format</label>
+              <select
+                value={format}
+                onChange={(e) => setFormat(e.target.value as ReportFormat)}
+                className={fieldClass}
+                style={fieldStyle}
+              >
+                {Object.entries(FORMAT_LABELS).map(([v, l]) => <option key={v} value={v}>{l}</option>)}
+              </select>
+            </div>
             <button
-              onClick={() => handleDownload(generate.data.id, generate.data.fileName)}
-              disabled={downloadingId === generate.data.id}
-              className="flex items-center gap-1.5 rounded-md px-3 py-1.5 text-xs font-medium disabled:opacity-50"
-              style={{ background: "var(--surface)", border: "1px solid var(--status-positive-border)", color: "var(--status-positive)" }}
+              onClick={handleGenerate}
+              disabled={generate.isPending}
+              className="rounded-md px-4 py-2 text-[13px] font-medium text-white disabled:opacity-60"
+              style={{ background: "var(--primary)" }}
             >
-              <Download size={12} strokeWidth={2} />
-              {downloadingId === generate.data.id ? "İndiriliyor..." : "Şimdi İndir"}
+              {generate.isPending ? "Oluşturuluyor..." : "Rapor Oluştur"}
             </button>
           </div>
-        )}
-        {generate.isError && (
-          <p className="text-body mt-3 flex items-center gap-1.5 font-medium" style={{ color: "var(--status-negative)" }}>
-            <XCircle size={13} strokeWidth={2} />
-            Rapor oluşturulamadı.
-          </p>
-        )}
-      </Card>
+
+          {generate.isSuccess && (
+            <div
+              className="mt-3 flex flex-wrap items-center justify-between gap-3 rounded-md p-3"
+              style={{ background: "var(--status-positive-bg)", border: "1px solid var(--status-positive-border)" }}
+            >
+              <p className="text-body flex items-center gap-1.5 font-medium" style={{ color: "var(--status-positive)" }}>
+                <CheckCircle2 size={14} strokeWidth={2} className="shrink-0" />
+                "{generate.data.fileName}" oluşturuldu ({generate.data.rowCount} satır)
+              </p>
+              <Can permission="reports.download">
+                <button
+                  onClick={() => handleDownload(generate.data.id, generate.data.fileName)}
+                  disabled={downloadingId === generate.data.id}
+                  className="flex items-center gap-1.5 rounded-md px-3 py-1.5 text-xs font-medium disabled:opacity-50"
+                  style={{ background: "var(--surface)", border: "1px solid var(--status-positive-border)", color: "var(--status-positive)" }}
+                >
+                  <Download size={12} strokeWidth={2} />
+                  {downloadingId === generate.data.id ? "İndiriliyor..." : "Şimdi İndir"}
+                </button>
+              </Can>
+            </div>
+          )}
+          {generate.isError && (
+            <p className="text-body mt-3 flex items-center gap-1.5 font-medium" style={{ color: "var(--status-negative)" }}>
+              <XCircle size={13} strokeWidth={2} />
+              Rapor oluşturulamadı.
+            </p>
+          )}
+        </Card>
+      </Can>
 
       <Card title="Rapor Geçmişi">
         {history.isLoading && <LoadingState />}
@@ -188,16 +193,18 @@ export function ReportsPage() {
                     <td className={tdClass} style={{ color: "var(--text-secondary)" }}>{r.requestedBy ?? "-"}</td>
                     <td className={tdClass} style={{ color: "var(--text-muted)" }}>{new Date(r.createdAt).toLocaleString("tr-TR")}</td>
                     <td className={tdClass}>
-                      <button
-                        onClick={() => handleDownload(r.id, r.fileName)}
-                        disabled={downloadingId === r.id}
-                        aria-label={`${r.fileName} dosyasını indir`}
-                        className="flex items-center gap-1 text-xs font-medium hover:underline disabled:opacity-50"
-                        style={{ color: "var(--primary)" }}
-                      >
-                        <Download size={12} strokeWidth={2} />
-                        {downloadingId === r.id ? "İndiriliyor..." : "İndir"}
-                      </button>
+                      <Can permission="reports.download">
+                        <button
+                          onClick={() => handleDownload(r.id, r.fileName)}
+                          disabled={downloadingId === r.id}
+                          aria-label={`${r.fileName} dosyasını indir`}
+                          className="flex items-center gap-1 text-xs font-medium hover:underline disabled:opacity-50"
+                          style={{ color: "var(--primary)" }}
+                        >
+                          <Download size={12} strokeWidth={2} />
+                          {downloadingId === r.id ? "İndiriliyor..." : "İndir"}
+                        </button>
+                      </Can>
                     </td>
                   </tr>
                 ))}

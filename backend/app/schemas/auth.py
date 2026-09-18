@@ -9,6 +9,8 @@ class AuthMeResponse(CamelModel):
     subject: str
     display_name: str | None
     email: str | None
+    role: str | None
+    permissions: list[str]
 
 
 class Identity(BaseModel):

@@ -74,7 +74,7 @@ class TestReportDownload:
 
         args, kwargs = calls[0]
         assert args[1] == _expected_authenticated_subject()
-        assert args[2] == "report_downloaded"
+        assert args[2] == "report.downloaded"
         assert kwargs["entity"] == "report_export"
         assert kwargs["new_value"] == existing.file_name
         assert kwargs.get("old_value") is None
@@ -162,7 +162,8 @@ class TestReportDownload:
 
         assert resp.status_code == 404
         assert unwrap_error(resp)["code"] == "REPORT_NOT_FOUND"
-        assert counter["n"] == 1
+        # +2: RBAC get_auth_context sabit ek yuku (user_role_assignments get + user_scope_assignments select)
+        assert counter["n"] == 3
         assert calls == []
         assert commit_calls == []
 

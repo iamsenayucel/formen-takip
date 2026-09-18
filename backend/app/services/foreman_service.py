@@ -1,19 +1,21 @@
 from __future__ import annotations
 
+from dataclasses import replace
 from uuid import UUID
 
 from sqlalchemy.orm import Session
 
 from app.core.errors import ForemanKpiRecordNotFoundError, ForemanNotFoundError
-from app.core.pagination import filter_signature, paginate_in_memory
-from app.core.turkish import turkish_sort_key
+from app.core.pagination import decode_cursor, encode_cursor, filter_signature
 from app.models.foreman import ForemanAssignment
 from app.repositories.foreman_repository import ForemanListQueryParams, ForemanRepository
 from app.schemas.common import CursorParams, Filters
 from app.services import analytics, contribution_bonus, kpi_presentation
-from app.services.kpi_engine import resolve_performance_level
+from app.services.kpi_engine import is_outstanding_performance, resolve_performance_level
 from app.services.level_lookup import foreman_level_payload, get_performance_levels
 from app.services.performance_scope import resolve_foreman_scope
+
+_COMPUTED_SORT_FIELDS = {"plant", "chief", "score", "level", "reliability"}
 
 
 class ForemanService:
@@ -84,32 +86,39 @@ class ForemanService:
             factory_ids=filters.factory_ids, plant_ids=filters.plant_ids, chief_ids=filters.chief_ids,
             date_from=filters.date_from, date_to=filters.date_to,
         )
-        all_foremen = self.repository.list(query_params)
 
-        scores_by_foreman = {s.key: s for s in analytics.foreman_scores(self.db, filters)}
-        bonuses_by_foreman = contribution_bonus.foreman_contribution_bonuses(
-            self.db, filters.date_to, foreman_ids=[f.id for f in all_foremen]
+        filter_sig = filter_signature(
+            search, ids, plant_id, chief_id, shift_id, is_active, level, outstanding,
+            filters.date_from, filters.date_to, filters.plant_ids, filters.factory_ids,
+            filters.chief_ids, filters.shift_ids, filters.kpi_ids, filters.foreman_ids,
         )
+        cursor_value = cursor_id = None
+        if page.cursor is not None:
+            state = decode_cursor(page.cursor, sort_by=sort_by, sort_dir=sort_dir, filter_sig=filter_sig)
+            cursor_value = state.sort_value
+            cursor_id = UUID(state.id)
 
-        foreman_ids = [f.id for f in all_foremen]
-        assignments_by_foreman = self.repository.batch_assignments_for_foremen(foreman_ids)
+        candidate_ids = self.repository.list_ids(query_params)
+
         plants_by_id = self.repository.all_plants_by_id()
         chiefs_by_id = self.repository.all_chiefs_by_id()
 
         factory_plant_ids = (
             {p.id for p in plants_by_id.values() if p.factory_id in set(filters.factory_ids)}
-            if filters.factory_ids
+            if filters.factory_ids is not None
             else None
         )
 
         def matches_filters(a: ForemanAssignment) -> bool:
             if factory_plant_ids is not None and a.plant_id not in factory_plant_ids:
                 return False
-            if filters.plant_ids and a.plant_id not in set(filters.plant_ids):
+            if filters.plant_ids is not None and a.plant_id not in set(filters.plant_ids):
                 return False
-            if filters.chief_ids and a.chief_id not in set(filters.chief_ids):
+            if filters.chief_ids is not None and a.chief_id not in set(filters.chief_ids):
                 return False
             return True
+
+        assignments_by_foreman: dict[UUID, list[ForemanAssignment]] = {}
 
         def matching_assignments(fid: UUID) -> list[ForemanAssignment]:
             candidates = [
@@ -118,62 +127,129 @@ class ForemanService:
             ]
             return [a for a in candidates if matches_filters(a)] or candidates
 
-        full_items = []
-        for f in all_foremen:
-            assignments = matching_assignments(f.id)
-            gs = scores_by_foreman.get(f.id)
-            operational_score = gs.total_score if gs else 0.0
-            bonus = bonuses_by_foreman.get(f.id)
-            contribution_bonus_value = bonus.bonus if bonus else 0
-            general_score = contribution_bonus.general_performance_score(operational_score, contribution_bonus_value)
-            assignment_items = self._assignments_to_dict(assignments, plants_by_id, chiefs_by_id)
-            min_plant_seq = min(
-                (plants_by_id[a.plant_id].sequence_number for a in assignments), default=-1
+        general_scores: dict[UUID, float] = {}
+        reliabilities: dict[UUID, bool] = {}
+        scores_by_foreman: dict[UUID, object] = {}
+        bonuses_by_foreman: dict[UUID, object] = {}
+        sort_values = None
+
+        # `level`/`outstanding` filtreleri ve computed-field sıralaması (plant/chief/score/
+        # level/reliability) TÜM adayların skorunu gerektirir — DB sayfalaması yapıldıktan
+        # sonra skor hesaplamak global sıralama/filtrelemeyi bozar. Bunlar talep edilmemişse
+        # (varsayılan sort_by="name") skor/bonus/atama hesaplaması yalnızca sayfa için yapılır —
+        # aynı desen plant_service.PlantService._hydrate_plant_items'ta da kullanılıyor.
+        needs_full_candidate_scores = bool(level) or bool(outstanding) or sort_by in _COMPUTED_SORT_FIELDS
+
+        if needs_full_candidate_scores:
+            scores_by_foreman = {s.key: s for s in analytics.foreman_scores(self.db, filters)}
+            bonuses_by_foreman = contribution_bonus.foreman_contribution_bonuses(
+                self.db, filters.date_to, foreman_ids=candidate_ids
             )
-            chief_name = assignment_items[0]["chief"]["name"] if assignment_items else ""
-            f_level = resolve_performance_level(general_score, levels)
-            full_items.append(
+            assignments_by_foreman = self.repository.batch_assignments_for_foremen(candidate_ids)
+
+            level_objs: dict[UUID, object] = {}
+            min_plant_seqs: dict[UUID, int] = {}
+            chief_names: dict[UUID, str] = {}
+
+            for fid in candidate_ids:
+                assignments = matching_assignments(fid)
+                gs = scores_by_foreman.get(fid)
+                operational_score = gs.total_score if gs else 0.0
+                bonus = bonuses_by_foreman.get(fid)
+                contribution_bonus_value = bonus.bonus if bonus else 0
+                general_score = contribution_bonus.general_performance_score(operational_score, contribution_bonus_value)
+                min_plant_seq = min((plants_by_id[a.plant_id].sequence_number for a in assignments), default=-1)
+                ordered = sorted(assignments, key=lambda a: plants_by_id[a.plant_id].sequence_number)
+                chief_name = (
+                    f"{chiefs_by_id[ordered[0].chief_id].first_name} {chiefs_by_id[ordered[0].chief_id].last_name}"
+                    if ordered else ""
+                )
+
+                general_scores[fid] = general_score
+                level_objs[fid] = resolve_performance_level(general_score, levels)
+                min_plant_seqs[fid] = min_plant_seq
+                chief_names[fid] = chief_name
+                reliabilities[fid] = gs.is_reliable if gs else False
+
+            if level or outstanding:
+                filtered_ids = []
+                for fid in candidate_ids:
+                    if level and level_objs[fid].name != level:
+                        continue
+                    if outstanding and not is_outstanding_performance(general_scores[fid]):
+                        continue
+                    filtered_ids.append(fid)
+                candidate_ids = filtered_ids
+                query_params = replace(query_params, id_allowlist=candidate_ids)
+
+            if sort_by in _COMPUTED_SORT_FIELDS:
+                if sort_by == "plant":
+                    sort_values = {fid: min_plant_seqs[fid] for fid in candidate_ids}
+                elif sort_by == "chief":
+                    sort_values = {fid: chief_names[fid] for fid in candidate_ids}
+                elif sort_by == "score":
+                    sort_values = {fid: general_scores[fid] for fid in candidate_ids}
+                elif sort_by == "level":
+                    sort_values = {fid: level_objs[fid].sort_order for fid in candidate_ids}
+                else:
+                    sort_values = {fid: reliabilities[fid] for fid in candidate_ids}
+
+        rows = self.repository.list_page(
+            query_params, sort_by=sort_by, sort_dir=sort_dir, sort_values=sort_values,
+            cursor_value=cursor_value, cursor_id=cursor_id, limit=page.limit,
+        )
+        has_more = len(rows) > page.limit
+        page_rows = rows[: page.limit]
+        page_foremen = [f for f, _ in page_rows]
+
+        total = self.repository.count(query_params)
+
+        if not needs_full_candidate_scores:
+            # Global skor/filtre gerekmiyor: yalnızca DB'nin döndürdüğü sayfa için hesapla.
+            # analytics.foreman_scores'u foreman_ids ile daraltmak GROUP BY foreman_id
+            # sonucunu değiştirmez (her grup diğerlerinden bağımsız aggregate edilir) —
+            # yalnızca taranan satır sayısını sayfa boyutuna indirger.
+            page_ids = [f.id for f in page_foremen]
+            assignments_by_foreman = self.repository.batch_assignments_for_foremen(page_ids)
+            if page_ids:
+                page_filters = replace(filters, foreman_ids=page_ids)
+                scores_by_foreman = {s.key: s for s in analytics.foreman_scores(self.db, page_filters)}
+                bonuses_by_foreman = contribution_bonus.foreman_contribution_bonuses(
+                    self.db, filters.date_to, foreman_ids=page_ids
+                )
+            for f in page_foremen:
+                gs = scores_by_foreman.get(f.id)
+                bonus = bonuses_by_foreman.get(f.id)
+                operational_score = gs.total_score if gs else 0.0
+                contribution_bonus_value = bonus.bonus if bonus else 0
+                general_scores[f.id] = contribution_bonus.general_performance_score(operational_score, contribution_bonus_value)
+
+        items = []
+        for f in page_foremen:
+            assignments = matching_assignments(f.id)
+            assignment_items = self._assignments_to_dict(assignments, plants_by_id, chiefs_by_id)
+            gs = scores_by_foreman.get(f.id)
+            bonus = bonuses_by_foreman.get(f.id)
+            items.append(
                 {
                     "id": str(f.id), "employee_number": f.employee_number,
                     "full_name": f"{f.first_name} {f.last_name}", "is_active": f.is_active,
                     "assignments": assignment_items,
-                    "operational_score": round(operational_score, 2),
-                    "contribution_bonus": contribution_bonus_value,
-                    "general_performance_score": round(general_score, 2),
+                    "operational_score": round(gs.total_score if gs else 0.0, 2),
+                    "contribution_bonus": bonus.bonus if bonus else 0,
+                    "general_performance_score": round(general_scores[f.id], 2),
                     "is_reliable": gs.is_reliable if gs else False,
-                    "level": foreman_level_payload(general_score, levels),
-                    "_sort": {
-                        "name": (turkish_sort_key(f.first_name), turkish_sort_key(f.last_name)),
-                        "employee_number": f.employee_number,
-                        "plant": min_plant_seq,
-                        "chief": turkish_sort_key(chief_name) if chief_name else (),
-                        "score": general_score,
-                        "level": f_level.sort_order,
-                        "reliability": gs.is_reliable if gs else False,
-                    },
+                    "level": foreman_level_payload(general_scores[f.id], levels),
                 }
             )
 
-        if level:
-            full_items = [it for it in full_items if it["level"]["name"] == level]
-        if outstanding:
-            full_items = [it for it in full_items if it["level"]["outstanding_performance"]]
-
-        reverse = sort_dir == "desc"
-        full_items.sort(key=lambda it: (it["_sort"][sort_by], it["id"]), reverse=reverse)
-        for it in full_items:
-            del it["_sort"]
-
-        total = len(full_items)
-        filter_sig = filter_signature(
-            search, ids, plant_id, chief_id, shift_id, is_active, level, outstanding,
-            filters.date_from, filters.date_to, filters.plant_ids, filters.factory_ids,
-            filters.chief_ids, filters.shift_ids, filters.kpi_ids, filters.foreman_ids,
-        )
-        items, next_cursor, has_more = paginate_in_memory(
-            full_items, id_key="id", cursor=page.cursor, limit=page.limit,
-            sort_by=sort_by, sort_dir=sort_dir, filter_sig=filter_sig,
-        )
+        next_cursor = None
+        if has_more and page_rows:
+            last_foreman, last_sort_value = page_rows[-1]
+            next_cursor = encode_cursor(
+                sort_by=sort_by, sort_dir=sort_dir, filter_sig=filter_sig,
+                sort_value=last_sort_value, id_=str(last_foreman.id),
+            )
         return {"items": items, "next_cursor": next_cursor, "has_more": has_more, "total": total}
 
     # ------------------------------------------------------------------
@@ -245,7 +321,7 @@ class ForemanService:
         }
 
     # ------------------------------------------------------------------
-    # KPI / Performance (Slice 2)
+    # KPI / Performance
     # ------------------------------------------------------------------
 
     def get_foreman_kpis(self, foreman_id: UUID, filters: Filters) -> dict:
@@ -348,7 +424,7 @@ class ForemanService:
         }
 
     # ------------------------------------------------------------------
-    # Assignment history (Slice 3)
+    # Assignment history
     # ------------------------------------------------------------------
 
     def get_assignment_history(self, foreman_id: UUID) -> dict:

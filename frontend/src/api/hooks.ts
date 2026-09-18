@@ -2,6 +2,7 @@ import { keepPreviousData, useInfiniteQuery, useMutation, useQuery, useQueryClie
 import { apiClient } from "./client";
 import type {
   AnalysisMode,
+  AuthMeResponse,
   AnomalyDetail,
   AnomalyInvestigation,
   AnomalyListItem,
@@ -53,6 +54,15 @@ type Params = Record<string, string | number | undefined>;
 
 function nextCursorParam(lastPage: CursorPage<unknown>): string | undefined {
   return lastPage.pagination.hasMore ? (lastPage.pagination.nextCursor ?? undefined) : undefined;
+}
+
+export function useAuthMe(enabled: boolean) {
+  return useQuery({
+    queryKey: ["auth", "me"],
+    queryFn: async () => (await apiClient.get<AuthMeResponse>("/auth/me")).data,
+    enabled,
+    staleTime: 5 * 60 * 1000,
+  });
 }
 
 export function useFilterOptions(plantIds?: string, factoryIds?: string) {

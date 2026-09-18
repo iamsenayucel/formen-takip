@@ -1,6 +1,7 @@
 import uuid
 from contextlib import contextmanager
 from datetime import date
+from pathlib import Path
 
 import pytest
 from sqlalchemy import event, func, select
@@ -13,6 +14,20 @@ from app.models.performance import PerformanceRecord
 from app.schemas.common import Filters
 from app.services import analytics
 from tests.helpers import unwrap, unwrap_error, unwrap_page
+
+
+@contextmanager
+def _capture_statements():
+    statements = []
+
+    def _on_execute(conn, cursor, statement, parameters, context, executemany):
+        statements.append(statement)
+
+    event.listen(engine, "before_cursor_execute", _on_execute)
+    try:
+        yield statements
+    finally:
+        event.remove(engine, "before_cursor_execute", _on_execute)
 
 
 @contextmanager
@@ -103,13 +118,12 @@ class TestPlantsEndpoints:
 
 
 class TestPlantBoundedDetailReadsCharacterization(_SeededPlantMixin):
-    """6A fabrika detail, kpis, shifts ve chiefs read akışlarının karakterizasyonu.
+    """fabrika detail, kpis, shifts ve chiefs read akışlarının karakterizasyonu. Değer,
+    sıralama, 404/boş-200 ayrımı ve path filter override davranışını kilitler; değerler
+    güncel PLT01 seed kaydına bağlıdır.
 
-    Değer, sıralama, 404/boş-200 ayrımı ve path filter override davranışını kilitler.
-    GET akışları read-only, değerler güncel PLT01 seed kaydına bağlıdır.
-
-    Önemli invariant: Bilinmeyen fabrikada yalnız detail 404 döner; kpis/shifts/chiefs
-    boş veya fallback içerikle 200 döner. Refactor bu davranışı normalize etmemelidir.
+    Bilinmeyen fabrikada yalnız detail 404 döner; kpis/shifts/chiefs boş veya fallback
+    içerikle 200 döner. Refactor bu davranışı normalize etmemeli.
     """
 
     _PARAMS = {"date_from": "2026-06-27", "date_to": "2026-07-27"}
@@ -220,11 +234,9 @@ class TestPlantBoundedDetailReadsCharacterization(_SeededPlantMixin):
     def test_plant_chiefs_empty_score_window_still_returns_the_chief_via_relationship(
         self, client, auth_headers, db_session
     ):
-        """kpis/shifts score verisi yokken boş döner; chiefs varlığı Plant.chief_id ilişkisine bağlıdır.
-
-        Mevcut fabrika boş scoring penceresinde de tek şef döndürür; total_score 0.0 ve
-        performance level en düşük seviyeye fallback yapar.
-        """
+        """kpis/shifts score verisi yokken boş döner; chiefs varlığı Plant.chief_id
+        ilişkisine bağlıdır. Boş scoring penceresinde de tek şef döner; total_score 0.0
+        ve performance level en düşük seviyeye fallback yapar."""
         resp = client.get(f"/api/v1/plants/{self._PLANT_ID}/chiefs", params=self._EMPTY_PARAMS, headers=auth_headers)
         assert resp.status_code == 200, resp.text
         body = unwrap(resp)
@@ -240,10 +252,9 @@ class TestPlantBoundedDetailReadsCharacterization(_SeededPlantMixin):
 
 
 class TestPlantHeavyReadsCharacterization(_SeededPlantMixin):
-    """6B plants list, summary ve foremen heavy read akışlarının karakterizasyonu.
-
-    Değer, sıralama, pagination, 404/boş-200 ve general/operational score ayrımını kilitler.
-    foreman-shift-matrix kapsam dışıdır. Değerler PLT01 ve active_foreman_count=2 olan
+    """plants list, summary ve foremen heavy read akışlarının karakterizasyonu. Değer,
+    sıralama, pagination, 404/boş-200 ve general/operational score ayrımını kilitler.
+    foreman-shift-matrix kapsam dışıdır; değerler PLT01 ve active_foreman_count=2 olan
     güncel seed kaydına bağlıdır.
     """
 
@@ -327,9 +338,8 @@ class TestPlantHeavyReadsCharacterization(_SeededPlantMixin):
         assert unwrap_error(resp)["code"] == "PLANT_NOT_FOUND"
 
     def test_plant_summary_path_plant_id_overrides_query_plant_filter(self, client, auth_headers):
-        """Path plant_id, 6A read akışlarında olduğu gibi çakışan query plant_ids
-        değerini hard-overwrite eder.
-        """
+        """Path plant_id, diğer read akışlarında olduğu gibi çakışan query plant_ids
+        değerini hard-overwrite eder."""
         items, _ = unwrap_page(client.get("/api/v1/plants", params={"limit": 2}, headers=auth_headers))
         other_plant_id = next(p["id"] for p in items if p["id"] != self._PLANT_ID)
 
@@ -342,11 +352,9 @@ class TestPlantHeavyReadsCharacterization(_SeededPlantMixin):
         assert scoped.json() == unscoped.json()
 
     def test_plant_foremen_exact_response_general_score_order(self, client, auth_headers):
-        """plant_foremen sıralama ve sunumda bonuslu general_performance_score kullanır.
-
-        plant_summary içindeki foremen_average_score operational ve bonussuzdur; bu gerçek
-        ayrım normalize edilmemelidir.
-        """
+        """plant_foremen sıralama ve sunumda bonuslu general_performance_score kullanır;
+        plant_summary'deki foremen_average_score operational ve bonussuzdur — bu ayrım
+        normalize edilmemeli."""
         resp = client.get(f"/api/v1/plants/{self._PLANT_ID}/foremen", params=self._PARAMS, headers=auth_headers)
         assert resp.status_code == 200, resp.text
         items, pagination = unwrap_page(resp)
@@ -395,25 +403,25 @@ class TestPlantHeavyReadsCharacterization(_SeededPlantMixin):
                 "/api/v1/plants", params={**self._PARAMS, "limit": 3}, headers=auth_headers
             )
         assert resp.status_code == 200
-        assert counter["n"] == 28
+        assert counter["n"] == 31  # +2: RBAC get_auth_context sabit ek yuku
 
     def test_plant_summary_query_count(self, client, auth_headers):
         with _count_queries() as counter:
             resp = client.get(f"/api/v1/plants/{self._PLANT_ID}/summary", params=self._PARAMS, headers=auth_headers)
         assert resp.status_code == 200
-        assert counter["n"] == 38
+        assert counter["n"] == 40  # +2: RBAC get_auth_context sabit ek yuku
 
     def test_plant_foremen_query_count(self, client, auth_headers):
         with _count_queries() as counter:
             resp = client.get(f"/api/v1/plants/{self._PLANT_ID}/foremen", params=self._PARAMS, headers=auth_headers)
         assert resp.status_code == 200
-        assert counter["n"] == 15
+        assert counter["n"] == 17  # +2: RBAC get_auth_context sabit ek yuku
 
     def test_plant_foremen_unknown_plant_query_count(self, client, auth_headers):
         with _count_queries() as counter:
             resp = client.get(f"/api/v1/plants/{self._UNKNOWN_ID}/foremen", params=self._PARAMS, headers=auth_headers)
         assert resp.status_code == 200
-        assert counter["n"] == 10
+        assert counter["n"] == 12  # +2: RBAC get_auth_context sabit ek yuku
 
 
 class TestForemenEndpoints:
@@ -466,9 +474,8 @@ class TestForemenEndpoints:
 
 
 class TestForemanAssignmentHistory:
-    """Aşama 3E — assignment-history önceden WEAK korumaya sahipti (yalnızca "boş değil"
-    kontrolü). Bu testler sıralamayı, ilişkili varlık alanlarını ve N+1'in kaldırıldığını
-    (sorgu sayısının atama sayısından bağımsız, sabit kaldığını) kilitler.
+    """assignment-history testleri sıralamayı, ilişkili varlık alanlarını ve N+1'in
+    kaldırıldığını (sorgu sayısının atama sayısından bağımsız, sabit kaldığını) kilitler.
     """
 
     def test_matches_db_ordering_and_related_entity_names(self, client, auth_headers, db_session):
@@ -535,15 +542,15 @@ class TestForemanAssignmentHistoryQueryCount:
         assert q_many == q_few, (
             f"Sorgu sayısı atama sayısıyla birlikte büyüyor: few={q_few} (n={few_n}), many={q_many} (n={many_n})"
         )
-        assert q_many <= 5, f"Beklenenden fazla sorgu: {q_many}"
+        # +2: RBAC get_auth_context sabit ek yuku (user_role_assignments get + user_scope_assignments select)
+        assert q_many <= 7, f"Beklenenden fazla sorgu: {q_many}"
 
 
 class TestForemanKpiPresentation:
-    """Aşama 3D — kpi_presentation.py'nin PLANA_UYUM sunumunu kilitleyen characterization testi.
-
-    Mevcut testler yalnızca alan varlığını kontrol ediyor; bu test aynı kaydın ham
-    denominator/numerator değerlerinden bağımsız olarak yeniden hesaplanan
-    kg_diff/signed_pct_deviation/status formülüyle response'un birebir eşleştiğini doğrular.
+    """kpi_presentation.py'nin PLANA_UYUM sunumunu kilitleyen characterization testi.
+    Diğer testler yalnızca alan varlığını kontrol eder; bu test ham denominator/numerator
+    değerlerinden yeniden hesaplanan kg_diff/signed_pct_deviation/status formülüyle
+    response'un birebir eşleştiğini doğrular.
     """
 
     def test_plana_uyum_calculation_detail_matches_raw_record_math(self, client, auth_headers, db_session):
@@ -589,8 +596,8 @@ class TestForemanKpiPresentation:
 
 
 class TestForemanTrendEndpoint:
-    """Aşama 3D — trend uç noktası için önceden hiç test koruması yoktu (NONE); bu
-    minimal characterization testleri mevcut response şeklini kilitler."""
+    """trend uç noktası için minimal characterization testleri; mevcut response şeklini
+    kilitler."""
 
     def test_requires_auth(self, client, db_session):
         foreman = db_session.scalar(select(Foreman).where(Foreman.is_active.is_(True)))
@@ -647,7 +654,7 @@ class TestKpiEndpoints:
         with _count_queries() as counter:
             resp = client.get("/api/v1/kpis", headers=auth_headers)
         assert resp.status_code == 200
-        assert counter["n"] == 1
+        assert counter["n"] == 3  # +2: RBAC get_auth_context sabit ek yuku
 
     def test_get_kpi_detail_exact_shape(self, client, auth_headers, db_session):
         kpi = db_session.scalars(select(Kpi).order_by(Kpi.display_order)).first()
@@ -679,12 +686,12 @@ class TestKpiEndpoints:
         with _count_queries() as counter:
             resp = client.get(f"/api/v1/kpis/{kpi.id}", headers=auth_headers)
         assert resp.status_code == 200
-        assert counter["n"] == 1
+        assert counter["n"] == 3  # +2: RBAC get_auth_context sabit ek yuku
 
         with _count_queries() as counter:
             resp2 = client.get(f"/api/v1/kpis/{uuid.uuid4()}", headers=auth_headers)
         assert resp2.status_code == 404
-        assert counter["n"] == 1
+        assert counter["n"] == 3  # +2: RBAC get_auth_context sabit ek yuku
 
     def test_kpi_analysis(self, client, auth_headers):
         kpi_id = unwrap(client.get("/api/v1/kpis", headers=auth_headers))[0]["id"]
@@ -864,7 +871,7 @@ class TestKpiAnalysis:
             resp = client.get(f"/api/v1/kpis/{uuid.uuid4()}/analysis", params=self._PERIOD, headers=auth_headers)
         assert resp.status_code == 404
         assert unwrap_error(resp)["code"] == "KPI_NOT_FOUND"
-        assert counter["n"] == 1
+        assert counter["n"] == 3  # +2: RBAC get_auth_context sabit ek yuku
 
     def test_empty_window_exact_response(self, client, auth_headers, db_session):
         kpi = self._kpi(db_session)
@@ -892,9 +899,80 @@ class TestKpiAnalysis:
         with _count_queries() as counter:
             resp = client.get(f"/api/v1/kpis/{kpi.id}/analysis", params=self._PERIOD, headers=auth_headers)
         assert resp.status_code == 200
-        assert counter["n"] == 62
+        assert counter["n"] == 64  # +2: RBAC get_auth_context sabit ek yuku
 
         with _count_queries() as counter:
             resp2 = client.get(f"/api/v1/kpis/{kpi.id}/analysis", params=self._EMPTY, headers=auth_headers)
         assert resp2.status_code == 200
-        assert counter["n"] == 49
+        assert counter["n"] == 51  # +2: RBAC get_auth_context sabit ek yuku
+
+
+class TestDbSideCursorPaginationRegression:
+    def test_paginate_in_memory_not_used_by_any_service_or_repository(self):
+        app_root = Path(__file__).resolve().parents[2] / "app"
+        offenders = [
+            str(path)
+            for sub in ("services", "repositories")
+            for path in (app_root / sub).rglob("*.py")
+            if "paginate_in_memory" in path.read_text(encoding="utf-8")
+        ]
+        assert offenders == []
+
+    def test_list_plants_query_is_limited_in_sql(self, client, auth_headers):
+        with _capture_statements() as statements:
+            resp = client.get("/api/v1/plants", params={"limit": 3}, headers=auth_headers)
+        assert resp.status_code == 200
+        matching = [s for s in statements if "plants" in s and "LIMIT" in s.upper()]
+        assert matching
+
+    def test_list_foremen_query_is_limited_in_sql(self, client, auth_headers):
+        with _capture_statements() as statements:
+            resp = client.get("/api/v1/foremen", params={"limit": 3}, headers=auth_headers)
+        assert resp.status_code == 200
+        matching = [s for s in statements if "foremen" in s and "LIMIT" in s.upper()]
+        assert matching
+
+    def test_list_foremen_cursor_pagination_continues_without_duplicates(self, client, auth_headers):
+        first = client.get("/api/v1/foremen", params={"limit": 5}, headers=auth_headers)
+        items1, pagination1 = unwrap_page(first)
+        assert len(items1) == 5
+        assert pagination1["hasMore"] is True
+        cursor = pagination1["nextCursor"]
+        assert cursor
+
+        second = client.get("/api/v1/foremen", params={"limit": 5, "cursor": cursor}, headers=auth_headers)
+        assert second.status_code == 200
+        items2, _ = unwrap_page(second)
+        ids1 = {i["id"] for i in items1}
+        ids2 = {i["id"] for i in items2}
+        assert ids1.isdisjoint(ids2)
+
+    def test_list_foremen_invalid_cursor_on_sort_mismatch(self, client, auth_headers):
+        first = client.get(
+            "/api/v1/foremen", params={"limit": 2, "sort_by": "name", "sort_dir": "asc"}, headers=auth_headers
+        )
+        _, pagination = unwrap_page(first)
+        cursor = pagination["nextCursor"]
+        assert cursor
+
+        mismatch = client.get(
+            "/api/v1/foremen",
+            params={"limit": 2, "sort_by": "employee_number", "sort_dir": "asc", "cursor": cursor},
+            headers=auth_headers,
+        )
+        assert mismatch.status_code == 400
+        assert unwrap_error(mismatch)["code"] == "INVALID_CURSOR"
+
+    def test_list_foremen_malformed_cursor_returns_invalid_cursor(self, client, auth_headers):
+        resp = client.get("/api/v1/foremen", params={"cursor": "not-a-real-cursor"}, headers=auth_headers)
+        assert resp.status_code == 400
+        assert unwrap_error(resp)["code"] == "INVALID_CURSOR"
+
+    def test_plant_foremen_query_is_limited_in_sql(self, client, auth_headers):
+        items, _ = unwrap_page(client.get("/api/v1/plants", params={"limit": 1}, headers=auth_headers))
+        plant_id = items[0]["id"]
+        with _capture_statements() as statements:
+            resp = client.get(f"/api/v1/plants/{plant_id}/foremen", headers=auth_headers)
+        assert resp.status_code == 200
+        matching = [s for s in statements if "foremen" in s and "LIMIT" in s.upper()]
+        assert matching

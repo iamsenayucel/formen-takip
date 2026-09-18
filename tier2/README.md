@@ -15,7 +15,7 @@ truth'tur; Tier2 belgeleri bunların okunabilir proje envanteridir.
 | 3 | [Veri Şeması](03-data-schema.md) | Güncel Alembic head, tablolar, constraintler, veri akışı ve altı KPI |
 | 4 | [API Kataloğu](04-api-catalog.md) | Aktif endpointler, filtre/pagination, auth ve error contract |
 | 5 | [Ekran Kataloğu](05-screen-catalog.md) | React route'ları, ekranlar ve frontend runtime davranışı |
-| 6 | [Güvenlik ve Uyum](06-security.md) | OIDC/PKCE/JWT, production fail-closed baseline ve deferred RBAC |
+| 6 | [Güvenlik ve Uyum](06-security.md) | OIDC/PKCE/JWT, production fail-closed baseline ve rol/scope tabanlı RBAC |
 | 7 | [Test Stratejisi](07-testing.md) | Backend/frontend test yapısı ve doğrulama gate'leri |
 | 8 | [Geliştirme ve Operasyon İş Akışı](08-workflow.md) | Geliştirme, deployment, scheduler ve incident yaklaşımı |
 | 9 | [Uygulama Yol Haritası](09-roadmap.md) | Tamamlanan yetenekler ve doğrulanmış gelecek işler |

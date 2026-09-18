@@ -120,7 +120,8 @@ class TestReportList:
             with count_queries() as counter:
                 resp = client.get("/api/v1/reports", headers=auth_headers, params=params)
             assert resp.status_code == 200
-            assert counter["n"] == 1, f"params={params!r}"
+            # +2: RBAC get_auth_context sabit ek yuku (user_role_assignments get + user_scope_assignments select)
+            assert counter["n"] == 3, f"params={params!r}"
 
     def test_enum_fields_serialize_as_values(self, client, auth_headers, db_session, report_exports):
         resp = client.get("/api/v1/reports", headers=auth_headers, params={"limit": 25})

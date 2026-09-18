@@ -3,14 +3,16 @@
 ## Veritabanı Şeması
 
 PostgreSQL şeması SQLAlchemy modelleri ve tek Alembic zinciriyle yönetilir.
-Güncel tek head:
+Güncel tek head (`alembic heads` ile doğrulandı):
 
 ```text
-3b43eeec9028 — Tier1 KPI weight rebalance
+3dd3d7f35759 — RBAC role/scope tabloları (user_role_assignments, user_scope_assignments)
 ```
 
 OEE zinciri `f1a3c5e7b9d2` (KPI ekleme) → `c4a99f861289` (vardiya seviyesinde
-720 dakika semantiği) → `3b43eeec9028` (güncel ağırlıklar) şeklindedir.
+720 dakika semantiği) → `3b43eeec9028` (güncel ağırlıklar) → `3dd3d7f35759`
+(RBAC, salt-additive: mevcut tablolara ALTER/lock/backfill yok, tam geri
+alınabilir) şeklindedir.
 
 Ana tablo grupları:
 
@@ -25,6 +27,7 @@ Ana tablo grupları:
 | Katkı | `contribution_works`, `contribution_work_foremen`, `contribution_work_plants`, `contribution_gains` | Çok formen/çok tesis iyileştirme çalışması |
 | Anomali | `anomalies`, `anomaly_analyses`, `anomaly_tool_calls` | Tespit, analiz denemesi ve araç izi |
 | Rapor | `report_exports`, `foreman_monthly_reports` | Genel export ve aylık formen snapshot/teslim metadata'sı |
+| Yetkilendirme | `user_role_assignments`, `user_scope_assignments` | Subject → rol (PK=subject) ve subject → ALL/FACTORY/PLANT scope satırları; PII içermez |
 | Denetim | `audit_logs` | OIDC subject tabanlı mutasyon izi |
 
 Tüm ana varlıklar UUID PK kullanır. Öne çıkan DB bütünlük kuralları:

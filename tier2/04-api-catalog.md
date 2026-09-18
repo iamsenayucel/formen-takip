@@ -119,6 +119,11 @@ Standart error envelope:
 `RATE_LIMIT_EXCEEDED` (429), `UPSTREAM_SERVICE_ERROR` (502) ve
 `SERVICE_UNAVAILABLE` (503).
 
-Fine-grained backend RBAC uygulanmamıştır; doğrulanmış OIDC kimliği için
-endpoint permission enforcement gelecek sürüme deferred'dır. Mutasyonlar
-OIDC subject ve request ID ile `audit_logs` tablosuna yazılır.
+Fine-grained backend RBAC uygulanmıştır: doğrulanmış OIDC kimliği bir role
+(`FOREMAN`/`SUPERVISOR`/`OPERATIONS_MANAGER`) ve isteğe bağlı ALL/FACTORY/
+PLANT veri kapsamına çözülür; her endpoint `Depends(require_permission(...))`
+taşır ve kapsam dışı tekil kaynak erişimi `403` döner (liste/filtre uçlarında
+kapsam dışı id'ler sessizce daraltılır). Rol/scope ataması olmayan bir subject
+tüm korumalı endpoint'lerden `403` alır. Detay ve rol→permission eşlemesi için
+bkz. [Güvenlik ve Uyum](06-security.md). Mutasyonlar OIDC subject ve request ID
+ile `audit_logs` tablosuna yazılır.

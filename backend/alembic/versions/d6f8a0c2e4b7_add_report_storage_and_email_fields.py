@@ -10,10 +10,9 @@ branch_labels: Union[str, Sequence[str], None] = None
 depends_on: Union[str, Sequence[str], None] = None
 
 
-# NOT: değerler Python enum member adlarıyla (uppercase) eşleşir — bu repodaki
-# SQLAlchemy Enum() kolonlarının hepsi values_callable kullanmadan varsayılan
-# davranışı (member.name, member.value değil) kullanır; bkz. app/models/report.py'deki
-# report_status/report_type enum'ları (ör. alembic/versions/ef3f90d743f8_...).
+# Değerler Python enum member adlarıyla (uppercase) eşleşir — repodaki SQLAlchemy
+# Enum() kolonlarının hepsi values_callable kullanmadan varsayılan davranışı
+# (member.name, member.value değil) kullanır; bkz. app/models/report.py.
 report_generation_status = sa.Enum(
     'PENDING', 'GENERATING', 'READY', 'FAILED', name='report_generation_status'
 )
@@ -58,11 +57,10 @@ def upgrade() -> None:
         'uq_foreman_monthly_reports_object_key', 'foreman_monthly_reports', ['object_key']
     )
 
-    # server_default yalnızca mevcut satırları geriye dönük doldurmak (backfill) için —
-    # uygulama katmanında modelde default olarak tekrarlanmaz, yeni satırlar Python
+    # server_default yalnızca mevcut satırları backfill etmek için; yeni satırlar Python
     # tarafında ORM default'uyla üretilir. Var olan raporların PDF'i S3'te henüz
-    # oluşmadığından pdf_generation_status=pending doğru başlangıç durumudur; veri
-    # kaybı yoktur, report_data (asıl rapor içeriği) hiç dokunulmamıştır.
+    # oluşmadığından pdf_generation_status=pending doğru başlangıç durumudur;
+    # report_data (asıl rapor içeriği) hiç dokunulmamıştır.
     op.alter_column('foreman_monthly_reports', 'pdf_generation_status', server_default=None)
     op.alter_column('foreman_monthly_reports', 'email_status', server_default=None)
     op.alter_column('foreman_monthly_reports', 'email_retry_count', server_default=None)

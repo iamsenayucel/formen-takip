@@ -9,7 +9,9 @@ from datetime import date, timedelta
 from app.core import clock
 from app.core.config import get_settings
 from app.db.session import SessionLocal
+from app.models.enums import Role, ScopeType
 from app.models.foreman import Foreman
+from app.services.authz_admin import assign_role, revoke_role
 from app.services.ingestion import backfill_data_quality_issues, run_ingestion
 from app.services.monthly_foreman_report import (
     generate_and_store_report_pdf,
@@ -39,6 +41,12 @@ from app.services.synthetic.reference_data import (
 # değer — gerçek kullanıcı kimliği artık yalnızca Red Hat SSO tarafından üretilir,
 # bu script uygulama içi bir "admin kullanıcı" kavramına ihtiyaç duymaz.
 SYNTHETIC_SEED_SUBJECT = "synthetic-seed-script"
+
+# Aynı gerekçeyle: `assign-role`/`revoke-role` CLI komutlarını interaktif çalıştıran
+# operatörün OIDC kimliği yoktur (bu bir HTTP request değildir) — audit_logs.subject
+# alanında "kim yaptı" sorusunu SYNTHETIC_SEED_SUBJECT'ten ayrıştırılabilir şekilde
+# yanıtlamak için ayrı bir sabit kullanılır.
+CLI_OPERATOR_SUBJECT = "cli-operator"
 
 
 def cmd_seed(args: argparse.Namespace) -> None:
@@ -113,8 +121,36 @@ def cmd_seed(args: argparse.Namespace) -> None:
         print("[5/5] Sentetik ML tespitleri (Tespitler modülü) üretiliyor...")
         anomalies = seed_anomalies(db, rng)
         print(f"  -> {anomalies.anomalies_created} tespit oluşturuldu.")
+
+        _seed_dev_role_assignments(db)
     finally:
         db.close()
+
+
+_DEV_ROLE_ASSIGNMENTS = (
+    # (subject, role) — subject'ler auth bypass sabiti (dev-demo-user) ve
+    # keycloak/formen-dev-realm.json'da "id" alanıyla sabitlenmiş 3 demo kullanıcıdır
+    # (dev-user, sef-demo-user, formen-demo-user); Keycloak internal user id, token'ın
+    # `sub` claim'i olarak kullanıldığından bu id'ler önceden bilinebilir/sabittir.
+    ("dev-demo-user", Role.OPERATIONS_MANAGER),
+    ("dev-user", Role.OPERATIONS_MANAGER),
+    ("sef-demo-user", Role.SUPERVISOR),
+    ("formen-demo-user", Role.FOREMAN),
+)
+
+
+def _seed_dev_role_assignments(db) -> None:
+    """Yerel geliştirme kimliklerine (auth bypass subject'i + local Keycloak dev realm
+    kullanıcıları) otomatik rol + ALL scope atar, böylece taze bir `docker compose up` +
+    `seed` sonrası uygulama ek bir manuel `assign-role` adımı gerekmeden üç farklı rolle
+    denenebilir. Yalnızca development ortamında çalışır — production seed'i (zaten dolu bir
+    DB'de çalışmayı reddeder) bu adımdan etkilenmez."""
+    if get_settings().environment != "development":
+        return
+    print("[dev] Yerel geliştirme kullanıcılarına rol atanıyor (dev-user/dev-demo-user=Operasyon Yöneticisi, sef-demo=Şef, formen-demo=Formen)...")
+    for subject, role in _DEV_ROLE_ASSIGNMENTS:
+        assign_role(db, subject, role, scope_type=ScopeType.ALL, actor=SYNTHETIC_SEED_SUBJECT)
+    db.commit()
 
 
 _LEVEL_LABEL_EN = {"Kritik": "Critical", "Geliştirilmeli": "Needs Improvement", "Başarılı": "Successful"}
@@ -474,6 +510,48 @@ def cmd_backfill_contribution_scores(args: argparse.Namespace) -> None:
         db.close()
 
 
+def cmd_assign_role(args: argparse.Namespace) -> None:
+    import uuid as uuid_module
+
+    role = Role(args.role)
+    scope_type = ScopeType(args.scope_type)
+    factory_id = uuid_module.UUID(args.factory_id) if args.factory_id else None
+    plant_ids = [uuid_module.UUID(p) for p in args.plant_id] if args.plant_id else None
+
+    db = SessionLocal()
+    try:
+        try:
+            assign_role(
+                db, args.subject, role, scope_type=scope_type, factory_id=factory_id, plant_ids=plant_ids,
+                actor=CLI_OPERATOR_SUBJECT,
+            )
+        except ValueError as exc:
+            print(f"Hata: {exc}")
+            sys.exit(1)
+        db.commit()
+        scope_desc = {
+            "ALL": "tüm organizasyon",
+            "FACTORY": f"fabrika {factory_id}",
+            "PLANT": f"{len(plant_ids or [])} tesis",
+        }[scope_type.value]
+        print(f"  -> {args.subject}: rol={role.value}, scope={scope_desc}")
+    finally:
+        db.close()
+
+
+def cmd_revoke_role(args: argparse.Namespace) -> None:
+    db = SessionLocal()
+    try:
+        had_assignment = revoke_role(db, args.subject, actor=CLI_OPERATOR_SUBJECT)
+        db.commit()
+        if had_assignment:
+            print(f"  -> {args.subject}: rol/scope ataması kaldırıldı (artık her yerde 403 alır).")
+        else:
+            print(f"  -> {args.subject}: zaten bir rol ataması yoktu (no-op, yine de audit'e yazıldı).")
+    finally:
+        db.close()
+
+
 def cmd_regenerate_personnel(args: argparse.Namespace) -> None:
     db = SessionLocal()
     try:
@@ -595,6 +673,33 @@ def main() -> None:
     resolve_email_parser.add_argument("--report-id", required=True, help="foreman_monthly_reports.id (UUID)")
     resolve_email_parser.add_argument("--resolution", required=True, choices=["sent", "retry"])
     resolve_email_parser.set_defaults(func=cmd_resolve_stale_email_job)
+
+    assign_role_parser = sub.add_parser(
+        "assign-role",
+        help="Bir OIDC subject'e rol + veri erişim kapsamı (scope) atar (idempotent — tekrar "
+        "çalıştırıldığında önceki atamanın yerine geçer, birikmez)",
+    )
+    assign_role_parser.add_argument("subject", help="OIDC subject (ör. Keycloak 'sub' claim'i)")
+    assign_role_parser.add_argument(
+        "role", choices=[r.value for r in Role], help="FOREMAN | SUPERVISOR | OPERATIONS_MANAGER"
+    )
+    assign_role_parser.add_argument(
+        "--scope-type", choices=[s.value for s in ScopeType], default="ALL", help="ALL | FACTORY | PLANT"
+    )
+    assign_role_parser.add_argument("--factory-id", default=None, help="scope-type=FACTORY için zorunlu (UUID)")
+    assign_role_parser.add_argument(
+        "--plant-id", action="append", default=None,
+        help="scope-type=PLANT için zorunlu, birden çok kez verilebilir (--plant-id X --plant-id Y)",
+    )
+    assign_role_parser.set_defaults(func=cmd_assign_role)
+
+    revoke_role_parser = sub.add_parser(
+        "revoke-role",
+        help="Bir OIDC subject'in rol + scope atamasını tamamen kaldırır (idempotent) — "
+        "subject artık her permission kontrolünde default-deny ile 403 alır",
+    )
+    revoke_role_parser.add_argument("subject", help="OIDC subject (ör. Keycloak 'sub' claim'i)")
+    revoke_role_parser.set_defaults(func=cmd_revoke_role)
 
     backfill_scores_parser = sub.add_parser(
         "backfill-contribution-scores",

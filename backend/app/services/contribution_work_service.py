@@ -54,7 +54,7 @@ class ContributionWorkService:
         self.repository = repository or ContributionWorkRepository(db)
 
     # ------------------------------------------------------------------
-    # Serialization (mevcut _to_dict ve yardımcıları — API contract birebir korunur)
+    # Serialization
     # ------------------------------------------------------------------
 
     def _foreman_ref_dict(self, f: Foreman, role: ContributionRole) -> dict:
@@ -161,7 +161,7 @@ class ContributionWorkService:
         }
 
     # ------------------------------------------------------------------
-    # Business helpers (mevcut davranış, yalnızca taşındı)
+    # Business helpers
     # ------------------------------------------------------------------
 
     def _publish_check_data(self, work: ContributionWork, foreman_ids: list[UUID], plant_ids: list[UUID]) -> dict:
@@ -208,15 +208,17 @@ class ContributionWorkService:
         date_from, date_to, plant_ids, factory_ids, foreman_ids,
         work_type, status, impact_level, financial_gain_status, search,
         sort_by: str, sort_dir: str, page: CursorParams,
+        scope_plant_ids: list[UUID] | None = None,
     ) -> dict:
         filters = ContributionWorkFilters(
             date_from=date_from, date_to=date_to, plant_ids=plant_ids, factory_ids=factory_ids,
             foreman_ids=foreman_ids, work_type=work_type, status=status, impact_level=impact_level,
             financial_gain_status=financial_gain_status, search=search,
+            scope_plant_ids=scope_plant_ids,
         )
         filter_sig = filter_signature(
             date_from, date_to, plant_ids, factory_ids, foreman_ids,
-            work_type, status, impact_level, financial_gain_status, search,
+            work_type, status, impact_level, financial_gain_status, search, scope_plant_ids,
         )
         cursor_value = None
         cursor_id = None
@@ -264,11 +266,13 @@ class ContributionWorkService:
         *,
         date_from, date_to, plant_ids, factory_ids, foreman_ids,
         work_type, status, impact_level, financial_gain_status, search,
+        scope_plant_ids: list[UUID] | None = None,
     ) -> dict:
         filters = ContributionWorkFilters(
             date_from=date_from, date_to=date_to, plant_ids=plant_ids, factory_ids=factory_ids,
             foreman_ids=foreman_ids, work_type=work_type, status=status, impact_level=impact_level,
             financial_gain_status=financial_gain_status, search=search,
+            scope_plant_ids=scope_plant_ids,
         )
         agg = self.repository.summary_aggregates(filters)
 
@@ -356,7 +360,7 @@ class ContributionWorkService:
         self._recompute_score(work)
 
         record_audit(
-            self.db, subject, "contribution_work_created", entity="contribution_work",
+            self.db, subject, "operational_impact.created", entity="contribution_work",
             new_value=payload.title, ip_address=ip_address,
         )
 
@@ -433,7 +437,7 @@ class ContributionWorkService:
 
         if changes or payload.foreman_ids is not None or payload.plant_ids is not None or payload.gains is not None:
             record_audit(
-                self.db, subject, "contribution_work_updated", entity="contribution_work",
+                self.db, subject, "operational_impact.updated", entity="contribution_work",
                 old_value=None, new_value="; ".join(changes) or "foremen/gains updated",
                 ip_address=ip_address,
             )
@@ -452,7 +456,7 @@ class ContributionWorkService:
         self.repository.flush()
 
         record_audit(
-            self.db, subject, "contribution_work_deleted", entity="contribution_work",
+            self.db, subject, "operational_impact.deleted", entity="contribution_work",
             old_value=title, ip_address=ip_address,
         )
 

@@ -56,20 +56,14 @@ export function ExecutiveHero({
               className="min-w-0 lg:flex-1 min-[1024px]:border-l min-[1024px]:pl-4 min-[1600px]:pl-6"
               style={{ borderColor: "var(--border-subtle)" }}
             >
-              {/* min-[640px] ile 4'e geçer (o an hero dikey istiflenmiş, tam
-                  genişlik var); min-[1024px]'te hero yatay yarılandığı için
-                  tekrar 2'ye düşer; min-[1600px]'ten (wide desktop, tokenlar
-                  tam genişlikte) itibaren yarı genişlik tekrar 4 kartı rahat
-                  taşır (bkz. görev talimatı "Genel Operasyonel Performans
-                  Bölümü"). 1440'ta değil 1600'de geçilmesinin nedeni: standard
-                  katmanda (1440-1599) padding/font henüz sadece kısmen
-                  küçülmüş durumda — 1440'ta 4'e geçmek "EN BAŞARILI TESİS"
-                  gibi başlıkları 3 satıra bölüyordu. Tailwind v4 arbitrary
-                  min-[Npx] variant'larını isimli sm/md/lg/xl breakpoint'lerden
-                  AYRI ve daha ÖNCE bir CSS bloğunda üretiyor — aynı property
-                  için ikisini karıştırmak cascade sırasını bozar (ör. lg:
-                  kuralı her zaman min-[1440px]'i ezer), bu yüzden burada aynı
-                  grid için tutarlı şekilde SADECE arbitrary variant kullanılır. */}
+              {/* Kırılma noktaları: min-640'ta 4 kart (hero dikey istiflenmişken tam
+                  genişlik var), min-1024'te hero yatay yarılandığı için 2'ye düşer,
+                  min-1600'den itibaren yarı genişlik yine 4'ü taşır. 1440 değil 1600
+                  seçildi: 1440-1599 aralığında padding/font henüz kısmen küçülmüş
+                  olduğundan 4'e geçmek başlıkları 3 satıra bölüyordu. Tailwind v4
+                  arbitrary min-[Npx] variant'ları isimli breakpoint'lerden ayrı ve önce
+                  üretildiği için aynı property'de ikisini karıştırmak cascade sırasını
+                  bozar — bu yüzden burada yalnızca arbitrary variant kullanılır. */}
               <div className="grid h-full grid-cols-2 gap-2.5 min-[640px]:grid-cols-4 min-[1024px]:grid-cols-2 min-[1600px]:grid-cols-4">
                 {summary.bestPlant && (
                   <StatCard

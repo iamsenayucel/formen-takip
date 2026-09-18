@@ -6,8 +6,8 @@ from uuid import UUID
 from sqlalchemy.orm import Session
 
 from app.core.errors import ChiefNotFoundError
-from app.core.pagination import filter_signature, paginate_in_memory
-from app.core.turkish import turkish_sort_key
+from app.core.pagination import decode_cursor, encode_cursor, filter_signature
+from app.models.foreman import Chief
 from app.repositories.chief_repository import ChiefRepository
 from app.repositories.foreman_repository import ForemanRepository
 from app.repositories.plant_repository import PlantRepository
@@ -16,6 +16,8 @@ from app.services import analytics, contribution_bonus
 from app.services.kpi_engine import resolve_performance_level
 from app.services.level_lookup import foreman_level_payload, get_performance_levels, level_to_dict
 from app.services.performance_scope import resolve_chief_scope
+
+_COMPUTED_SORT_FIELDS = {"foreman_count", "score", "level", "reliability"}
 
 
 def chief_group_code(employee_number: str) -> str:
@@ -58,20 +60,81 @@ class ChiefService:
             filters.plant_ids = [plant_id]
 
         levels = get_performance_levels(self.db)
-        chiefs = self.repository.list_in_scope(filters, search, is_active)
 
+        filter_sig = filter_signature(
+            search, plant_id, is_active,
+            filters.date_from, filters.date_to, filters.plant_ids, filters.factory_ids,
+            filters.chief_ids, filters.shift_ids, filters.kpi_ids, filters.foreman_ids,
+        )
+        cursor_value = cursor_id = None
+        if page.cursor is not None:
+            state = decode_cursor(page.cursor, sort_by=sort_by, sort_dir=sort_dir, filter_sig=filter_sig)
+            cursor_value = state.sort_value
+            cursor_id = UUID(state.id)
+
+        sort_values = None
+        if sort_by in _COMPUTED_SORT_FIELDS:
+            candidate_ids = self.repository.list_ids(filters, search, is_active)
+            teams_by_chief = {t.chief_id: t for t in analytics.chief_team_scores(self.db, filters)}
+            if sort_by == "foreman_count":
+                sort_values = {
+                    cid: teams_by_chief[cid].foreman_count if cid in teams_by_chief else 0
+                    for cid in candidate_ids
+                }
+            elif sort_by == "score":
+                sort_values = {
+                    cid: teams_by_chief[cid].total_score if cid in teams_by_chief else 0.0
+                    for cid in candidate_ids
+                }
+            elif sort_by == "level":
+                sort_values = {
+                    cid: resolve_performance_level(
+                        teams_by_chief[cid].total_score if cid in teams_by_chief else 0.0, levels
+                    ).sort_order
+                    for cid in candidate_ids
+                }
+            else:
+                sort_values = {
+                    cid: teams_by_chief[cid].is_reliable if cid in teams_by_chief else False
+                    for cid in candidate_ids
+                }
+
+        rows = self.repository.list_page(
+            filters, search, is_active,
+            sort_by=sort_by, sort_dir=sort_dir, sort_values=sort_values,
+            cursor_value=cursor_value, cursor_id=cursor_id, limit=page.limit,
+        )
+        has_more = len(rows) > page.limit
+        page_rows = rows[: page.limit]
+        page_chiefs = [c for c, _ in page_rows]
+
+        total = self.repository.count(filters, search, is_active)
+        items = self._hydrate_chief_items(page_chiefs, filters, levels)
+
+        next_cursor = None
+        if has_more and page_rows:
+            last_chief, last_sort_value = page_rows[-1]
+            next_cursor = encode_cursor(
+                sort_by=sort_by, sort_dir=sort_dir, filter_sig=filter_sig,
+                sort_value=last_sort_value, id_=str(last_chief.id),
+            )
+        return {"items": items, "next_cursor": next_cursor, "has_more": has_more, "total": total}
+
+    def _hydrate_chief_items(self, page_chiefs: list[Chief], filters: Filters, levels) -> list[dict]:
+        if not page_chiefs:
+            return []
         teams_by_chief = {t.chief_id: t for t in analytics.chief_team_scores(self.db, filters)}
         factories_by_id = self.plant_repository.all_factories_by_id()
         plants_by_chief = self.plant_repository.plants_grouped_by_chief_id()
 
-        full_items = []
-        for c in chiefs:
+        items = []
+        for c in page_chiefs:
             team = teams_by_chief.get(c.id)
             score = team.total_score if team else 0.0
             chief_plants = sorted(plants_by_chief.get(c.id, []), key=lambda p: p.sequence_number)
             factory = factories_by_id.get(chief_plants[0].factory_id) if chief_plants else None
             level = resolve_performance_level(score, levels)
-            full_items.append(
+            items.append(
                 {
                     "id": str(c.id),
                     "employee_number": c.employee_number,
@@ -84,34 +147,9 @@ class ChiefService:
                     "total_score": round(score, 2),
                     "is_reliable": team.is_reliable if team else False,
                     "level": level_to_dict(level),
-                    "_sort": {
-                        "name": (turkish_sort_key(c.first_name), turkish_sort_key(c.last_name)),
-                        "employee_number": c.employee_number,
-                        "plant": chief_plants[0].sequence_number if chief_plants else -1,
-                        "factory": turkish_sort_key(factory.code) if factory else (),
-                        "foreman_count": team.foreman_count if team else 0,
-                        "score": score,
-                        "level": level.sort_order,
-                        "reliability": team.is_reliable if team else False,
-                    },
                 }
             )
-
-        full_items.sort(key=lambda it: (it["_sort"][sort_by], it["id"]), reverse=sort_dir == "desc")
-        for it in full_items:
-            del it["_sort"]
-
-        total = len(full_items)
-        filter_sig = filter_signature(
-            search, plant_id, is_active,
-            filters.date_from, filters.date_to, filters.plant_ids, filters.factory_ids,
-            filters.chief_ids, filters.shift_ids, filters.kpi_ids, filters.foreman_ids,
-        )
-        items, next_cursor, has_more = paginate_in_memory(
-            full_items, id_key="id", cursor=page.cursor, limit=page.limit,
-            sort_by=sort_by, sort_dir=sort_dir, filter_sig=filter_sig,
-        )
-        return {"items": items, "next_cursor": next_cursor, "has_more": has_more, "total": total}
+        return items
 
     def get_detail(self, chief_id: UUID, filters: Filters) -> dict:
         chief = self._get_or_404(chief_id)

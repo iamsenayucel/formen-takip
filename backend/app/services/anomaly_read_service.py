@@ -88,7 +88,7 @@ class AnomalyReadService:
             "has_more": has_more,
         }
 
-    def get_summary(self) -> dict:
+    def get_summary(self, plant_ids: list[UUID] | None = None) -> dict:
         now = clock.now_utc()
         week_ago = now - timedelta(days=7)
         return self.repository.summary_counts(
@@ -98,6 +98,7 @@ class AnomalyReadService:
             not_analyzed_status=AnomalyAnalysisStatus.NOT_ANALYZED,
             week_ago=week_ago,
             resolved_statuses=(AnomalyStatus.RESOLVED, AnomalyStatus.CLOSED),
+            plant_ids=plant_ids,
         )
 
     def get_detail(self, anomaly_id: UUID) -> dict:

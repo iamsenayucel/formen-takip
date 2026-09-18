@@ -6,13 +6,16 @@ import {
   Menu, X,
 } from "lucide-react";
 import { useAuth } from "../context/AuthContext";
+import { usePermissions } from "../context/PermissionContext";
 import { useTheme } from "../context/ThemeContext";
 import { PerformanceLeadersPanel } from "./PerformanceLeadersPanel";
+import type { Permission } from "../auth/permissions";
 
 interface NavItem {
   to: string;
   label: string;
   icon: typeof LayoutGrid;
+  permission: Permission;
 }
 
 interface NavSection {
@@ -21,37 +24,43 @@ interface NavSection {
 }
 
 const NAV_SECTIONS: NavSection[] = [
-  { label: null, items: [{ to: "/", label: "Genel Bakış", icon: LayoutGrid }] },
+  { label: null, items: [{ to: "/", label: "Genel Bakış", icon: LayoutGrid, permission: "overview.view" }] },
   {
     label: "Performans",
     items: [
-      { to: "/plants", label: "Tesisler", icon: Factory },
-      { to: "/groups", label: "Gruplar", icon: Users },
-      { to: "/foremen", label: "Formenler", icon: HardHat },
-      { to: "/kpis", label: "KPI Analizi", icon: Target },
+      { to: "/plants", label: "Tesisler", icon: Factory, permission: "performance.view" },
+      { to: "/groups", label: "Gruplar", icon: Users, permission: "performance.view" },
+      { to: "/foremen", label: "Formenler", icon: HardHat, permission: "performance.view" },
+      { to: "/kpis", label: "KPI Analizi", icon: Target, permission: "performance.view" },
     ],
   },
   {
     label: "Operasyonel Zekâ",
     items: [
-      { to: "/anomalies", label: "Tespitler", icon: SearchCheck },
-      { to: "/shift-analysis", label: "Vardiya Analizi", icon: Repeat2 },
-      { to: "/improvement-works", label: "Operational Impact+", icon: Sparkles },
+      { to: "/anomalies", label: "Tespitler", icon: SearchCheck, permission: "operational_intelligence.view" },
+      { to: "/shift-analysis", label: "Vardiya Analizi", icon: Repeat2, permission: "operational_intelligence.view" },
+      { to: "/improvement-works", label: "Operational Impact+", icon: Sparkles, permission: "operational_intelligence.view" },
     ],
   },
   {
     label: "Çıktılar",
     items: [
-      { to: "/executive-summary", label: "Yönetici Özeti", icon: Presentation },
-      { to: "/reports", label: "Raporlar", icon: FileText },
+      { to: "/executive-summary", label: "Yönetici Özeti", icon: Presentation, permission: "overview.view" },
+      { to: "/reports", label: "Raporlar", icon: FileText, permission: "outputs.view" },
     ],
   },
 ];
 
 function NavLinks({ onNavigate }: { onNavigate?: () => void }) {
+  const { can, isLoading } = usePermissions();
+  const visibleSections = NAV_SECTIONS.map((section) => ({
+    ...section,
+    items: isLoading ? [] : section.items.filter((item) => can(item.permission)),
+  })).filter((section) => section.items.length > 0);
+
   return (
     <nav className="flex flex-1 flex-col gap-3 overflow-y-auto px-2.5 py-3">
-      {NAV_SECTIONS.map((section, sIdx) => (
+      {visibleSections.map((section, sIdx) => (
         <div key={section.label ?? `section-${sIdx}`} className="flex flex-col gap-0.5">
           {section.label && (
             <p
@@ -134,7 +143,9 @@ export function Layout({ children }: { children: ReactNode }) {
         style={{ background: "var(--sidebar-bg)", borderRight: "1px solid var(--sidebar-border)" }}
       >
         <div className="px-4 py-4" style={{ borderBottom: "1px solid var(--sidebar-border)" }}>
-          <img src="/logo.png" alt="CORVUS Logo" className="h-auto w-full" />
+          <div className="rounded-md p-2" style={{ background: "#ffffff" }}>
+            <img src="/logo.png" alt="CORVUS Logo" className="h-auto w-full" />
+          </div>
         </div>
         <NavLinks />
       </aside>
@@ -154,7 +165,9 @@ export function Layout({ children }: { children: ReactNode }) {
               className="flex items-center justify-between px-4 py-3.5"
               style={{ borderBottom: "1px solid var(--sidebar-border)" }}
             >
-              <img src="/logo.png" alt="CORVUS Logo" className="h-auto w-[170px]" />
+              <div className="rounded-md p-1.5" style={{ background: "#ffffff" }}>
+                <img src="/logo.png" alt="CORVUS Logo" className="h-auto w-[170px]" />
+              </div>
               <button
                 onClick={() => setMobileNavOpen(false)}
                 aria-label="Menüyü kapat"

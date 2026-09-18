@@ -169,9 +169,8 @@ class TestAnomalyInvestigation:
 
 
 class TestFactoryShiftComparisonNumericParity:
-    """4B-2A1 karakterizasyonu: Bilinen seed anomalisi için factory/shift karşılaştırma
-    çıktılarını kilitler ve active-shift fetch refactor'ının sonucu koruduğunu doğrular.
-    Güncel seed UUID'lerine bağlıdır; reseed sonrasında geçerli olması beklenmez.
+    """Bilinen seed anomalisi için factory/shift karşılaştırma çıktılarını kilitler.
+    Güncel seed UUID'lerine bağlıdır; reseed sonrasında geçerli olmaz.
     """
 
     def test_anm_2026_0001_factory_and_shift_comparison_exact_values(self, client, auth_headers, db_session):
@@ -304,11 +303,6 @@ class TestAnomalyStatusUpdate:
             f"/api/v1/anomalies/{anomaly.id}/status", json={"status": "not-a-real-status"}, headers=auth_headers
         )
         assert resp.status_code == 422
-
-
-# ---------------------------------------------------------------------------
-# 4B-1 characterization fixtures (Detail + Analysis Reads)
-# ---------------------------------------------------------------------------
 
 
 def _anomaly_without_analyses(db_session) -> Anomaly:
@@ -532,15 +526,9 @@ class TestAnalysisToolCalls:
             db_session.commit()
 
 
-# ---------------------------------------------------------------------------
-# 4C-1 karakterizasyon fixture'ları (Status Command Layering)
-# ---------------------------------------------------------------------------
-
-
 class TestAnomalyDetailShapeCoverage:
-    """`GET /anomalies/{id}` detail contract'ını dört temsilî seed biçiminde kilitler:
+    """`GET /anomalies/{id}` detail contract'ını dört seed anomali biçiminde kilitler:
     normal KPI, INKITA/downtime, foreman_ids içeren ve vardiyasız anomali.
-    Eski implementasyon parity'si yerine güncel contract'ı doğrudan doğrular.
     """
 
     _DETAIL_KEYS = {
@@ -556,8 +544,6 @@ class TestAnomalyDetailShapeCoverage:
     }
 
     def test_detail_contract_across_seed_anomaly_shapes(self, client, auth_headers, db_session):
-        # Normal KPI (PLANA_UYUM, formen yok), INKITA (downtime breakdown), foreman_ids
-        # içeren ve vardiyasız anomali olmak üzere dört farklı output biçimi.
         codes = ["ANM-2026-0001", "ANM-2026-0009", "ANM-2026-0005", "ANM-2026-0003"]
 
         for code in codes:
@@ -583,9 +569,9 @@ class TestAnomalyDetailShapeCoverage:
 
 
 class TestAnomalyStatusServiceCharacterization:
-    """4C-1: `PATCH /status` için audit biçimi, same-status no-op, 404 ve 422
-    davranışlarını kilitler. Her test seed anomalisinin durumunu geri yükler ve audit
-    kaydını siler. Kalıcı mutation bırakan TestAnomalyStatusUpdate çalıştırılmamalıdır.
+    """`PATCH /status` için audit biçimi, same-status no-op, 404 ve 422 davranışlarını
+    kilitler. Her test seed anomalisinin durumunu geri yükler ve audit kaydını siler.
+    Kalıcı mutation bırakan TestAnomalyStatusUpdate ile birlikte çalıştırılmamalıdır.
     """
 
     def test_status_change_creates_expected_audit_row(self, client, auth_headers, db_session):
@@ -682,11 +668,6 @@ class TestAnomalyStatusServiceCharacterization:
             db_session.commit()
 
 
-# ---------------------------------------------------------------------------
-# 4C-2 karakterizasyon fixture'ları (Analyze / Reanalyze Command Layering)
-# ---------------------------------------------------------------------------
-
-
 def _isolated_anomaly(db_session) -> Anomaly:
     template = _sample_anomaly(db_session)
     return _make_synthetic_anomaly(db_session, template, [])
@@ -700,7 +681,7 @@ def _delete_isolated_anomaly(db_session, anomaly: Anomaly) -> None:
 
 
 class TestAnalyzeCommandResponseParity:
-    """4C-2 gate #2: Demo fallback analyze response'u aynı anomali için yeni hesaplanan
+    """Demo fallback analyze response'u aynı anomali için yeniden hesaplanan
     AnomalyReadService.get_detail ile eşleşmelidir. Mutation izole sentetik anomalide
     yapılır ve tamamen temizlenir.
     """
@@ -736,7 +717,7 @@ class TestAnalyzeCommandResponseParity:
 
 
 class TestReanalyzeCommandResponseParity:
-    """4C-2 gate #3: Reanalyze eskiyi güncellemek yerine yeni history satırı oluşturmalı,
+    """Reanalyze eskiyi güncellemek yerine yeni history satırı oluşturmalı,
     current_analysis_id bu satıra geçmeli ve response get_detail ile eşleşmelidir.
     """
 
@@ -776,9 +757,9 @@ class TestReanalyzeCommandResponseParity:
 
 
 class TestAnalyzeCacheHitBehavior:
-    """4C-2: Analyze fast-path koşullarını ve sonuçlarını kilitler: force/force_refresh
-    yok, durum COMPLETED ve tamamlanmış satır var; yeni analiz/audit oluşmaz.
-    force_refresh ile reanalyze cache'i bypass etmelidir.
+    """Analyze fast-path koşullarını kilitler: force/force_refresh yok, durum COMPLETED
+    ve tamamlanmış satır varsa yeni analiz/audit oluşmaz. force_refresh ile reanalyze
+    cache'i bypass etmelidir.
     """
 
     def test_completed_analysis_without_force_refresh_short_circuits(self, client, auth_headers, db_session):
@@ -843,8 +824,8 @@ class TestAnalyzeCacheHitBehavior:
 
 
 class TestAnalyzeFailedRunAudit:
-    """4C-2: FAILED, exception akışı değildir; run_analysis normal döner ve audit üretir.
-    Gerçek provider yerine llm_service.call_llm her zaman hata verecek şekilde monkeypatch edilir.
+    """FAILED durumu exception akışı değildir; run_analysis normal döner ve audit üretir.
+    llm_service.call_llm her zaman hata verecek şekilde monkeypatch edilir.
     """
 
     def test_failed_analysis_still_produces_audit_row(self, client, auth_headers, db_session, monkeypatch):

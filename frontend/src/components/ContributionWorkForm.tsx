@@ -269,16 +269,17 @@ export function ContributionWorkForm({ existing, onClose }: Props) {
         <div className="flex flex-col gap-3 overflow-y-auto px-5 py-4">
           <Section title="1. Kişiler ve Konum" subtitle="İlgili formenler, fabrika/tesis ve çalışma tarihi" hasError={peopleHasError}>
             <div>
-              <label className={labelClass} style={labelStyle}>İlgili Formen(ler)</label>
-              <ForemanMultiSelect selected={foremen} onChange={markDirty(setForemen)} />
+              <label htmlFor="cwf-foremen" className={labelClass} style={labelStyle}>İlgili Formen(ler)</label>
+              <ForemanMultiSelect id="cwf-foremen" selected={foremen} onChange={markDirty(setForemen)} />
               <FieldError message={fieldErrors.foremanIds} />
             </div>
 
             <div className="grid grid-cols-2 gap-3">
               <div>
-                <label className={labelClass} style={labelStyle}>Fabrika(lar)</label>
+                <label id="cwf-factories-label" className={labelClass} style={labelStyle}>Fabrika(lar)</label>
                 <MultiSelect
                   label="Fabrika"
+                  aria-labelledby="cwf-factories-label"
                   options={(filterOptions.data?.factories ?? []).map((f) => ({ id: f.id, name: f.name, hint: f.code }))}
                   selected={factoryIds}
                   onChange={(ids) => {
@@ -295,9 +296,10 @@ export function ContributionWorkForm({ existing, onClose }: Props) {
                 />
               </div>
               <div>
-                <label className={labelClass} style={labelStyle}>Tesis(ler)</label>
+                <label id="cwf-plants-label" className={labelClass} style={labelStyle}>Tesis(ler)</label>
                 <MultiSelect
                   label="Tesis"
+                  aria-labelledby="cwf-plants-label"
                   options={plantsForFactory.map((p) => ({ id: p.id, name: p.name }))}
                   selected={plantIds}
                   onChange={markDirty(setPlantIds)}
@@ -307,12 +309,12 @@ export function ContributionWorkForm({ existing, onClose }: Props) {
             </div>
 
             <div>
-              <label className={labelClass} style={labelStyle}>Kaydı Oluşturan Yönetici</label>
-              <input disabled value={user?.fullName ?? ""} className={`${fieldClass} disabled:opacity-70`} style={fieldStyle} />
+              <label htmlFor="cwf-manager" className={labelClass} style={labelStyle}>Kaydı Oluşturan Yönetici</label>
+              <input id="cwf-manager" disabled value={user?.fullName ?? ""} className={`${fieldClass} disabled:opacity-70`} style={fieldStyle} />
             </div>
 
             <div>
-              <label className={labelClass} style={labelStyle}>Çalışma Tarihi</label>
+              <label id="cwf-work-date-label" className={labelClass} style={labelStyle}>Çalışma Tarihi</label>
               <div className="mb-2 flex gap-3 text-xs" style={{ color: "var(--text-secondary)" }}>
                 <label className="flex items-center gap-1.5">
                   <input type="radio" checked={dateMode === "single"} onChange={() => markDirty(setDateMode)("single")} />
@@ -324,9 +326,9 @@ export function ContributionWorkForm({ existing, onClose }: Props) {
                 </label>
               </div>
               <div className="grid grid-cols-2 gap-3">
-                <input type="date" value={workDate} onChange={(e) => markDirty(setWorkDate)(e.target.value)} className={fieldClass} style={fieldStyle} />
+                <input type="date" aria-labelledby="cwf-work-date-label" value={workDate} onChange={(e) => markDirty(setWorkDate)(e.target.value)} className={fieldClass} style={fieldStyle} />
                 {dateMode === "range" && (
-                  <input type="date" value={workDateEnd} min={workDate || undefined} onChange={(e) => markDirty(setWorkDateEnd)(e.target.value)} className={fieldClass} style={fieldStyle} />
+                  <input type="date" aria-labelledby="cwf-work-date-label" value={workDateEnd} min={workDate || undefined} onChange={(e) => markDirty(setWorkDateEnd)(e.target.value)} className={fieldClass} style={fieldStyle} />
                 )}
               </div>
               <FieldError message={fieldErrors.workDate || fieldErrors.workDateEnd} />
@@ -335,67 +337,67 @@ export function ContributionWorkForm({ existing, onClose }: Props) {
 
           <Section title="2. Temel Bilgiler" subtitle="Başlık, tür ve açıklamalar" hasError={basicsHasError}>
             <div>
-              <label className={labelClass} style={labelStyle}>Çalışma Başlığı</label>
-              <input value={title} onChange={(e) => markDirty(setTitle)(e.target.value)} className={fieldClass} style={fieldStyle} />
+              <label htmlFor="cwf-title" className={labelClass} style={labelStyle}>Çalışma Başlığı</label>
+              <input id="cwf-title" value={title} onChange={(e) => markDirty(setTitle)(e.target.value)} className={fieldClass} style={fieldStyle} />
               <FieldError message={fieldErrors.title} />
             </div>
 
             <div className="grid grid-cols-2 gap-3">
               <div>
-                <label className={labelClass} style={labelStyle}>Çalışma Türü</label>
-                <select value={workType} onChange={(e) => markDirty(setWorkType)(e.target.value as ContributionWorkType)} className={fieldClass} style={fieldStyle}>
+                <label htmlFor="cwf-work-type" className={labelClass} style={labelStyle}>Çalışma Türü</label>
+                <select id="cwf-work-type" value={workType} onChange={(e) => markDirty(setWorkType)(e.target.value as ContributionWorkType)} className={fieldClass} style={fieldStyle}>
                   <option value="">Seçiniz</option>
                   {workTypeOptions.map(([v, l]) => <option key={v} value={v}>{l}</option>)}
                 </select>
                 <FieldError message={fieldErrors.workType} />
               </div>
               <div>
-                <label className={labelClass} style={labelStyle}>Etki Seviyesi</label>
-                <select value={impactLevel} onChange={(e) => markDirty(setImpactLevel)(e.target.value as ImpactLevel)} className={fieldClass} style={fieldStyle}>
+                <label htmlFor="cwf-impact-level" className={labelClass} style={labelStyle}>Etki Seviyesi</label>
+                <select id="cwf-impact-level" value={impactLevel} onChange={(e) => markDirty(setImpactLevel)(e.target.value as ImpactLevel)} className={fieldClass} style={fieldStyle}>
                   {IMPACT_OPTIONS.map(([v, l]) => <option key={v} value={v}>{l}</option>)}
                 </select>
               </div>
             </div>
             {workType === "other" && (
               <div>
-                <label className={labelClass} style={labelStyle}>Çalışma Türünü Açıklayın</label>
-                <input value={workTypeOtherNote} onChange={(e) => markDirty(setWorkTypeOtherNote)(e.target.value)} className={fieldClass} style={fieldStyle} />
+                <label htmlFor="cwf-work-type-other-note" className={labelClass} style={labelStyle}>Çalışma Türünü Açıklayın</label>
+                <input id="cwf-work-type-other-note" value={workTypeOtherNote} onChange={(e) => markDirty(setWorkTypeOtherNote)(e.target.value)} className={fieldClass} style={fieldStyle} />
                 <FieldError message={fieldErrors.workTypeOtherNote} />
               </div>
             )}
 
             <div>
-              <label className={labelClass} style={labelStyle}>Kısa Özet</label>
-              <textarea value={summary} onChange={(e) => markDirty(setSummary)(e.target.value)} rows={2} maxLength={500} className={fieldClass} style={fieldStyle} />
+              <label htmlFor="cwf-summary" className={labelClass} style={labelStyle}>Kısa Özet</label>
+              <textarea id="cwf-summary" value={summary} onChange={(e) => markDirty(setSummary)(e.target.value)} rows={2} maxLength={500} className={fieldClass} style={fieldStyle} />
               <FieldError message={fieldErrors.summary} />
             </div>
             <div>
-              <label className={labelClass} style={labelStyle}>Detaylı Açıklama</label>
-              <textarea value={detailedDescription} onChange={(e) => markDirty(setDetailedDescription)(e.target.value)} rows={3} className={fieldClass} style={fieldStyle} />
+              <label htmlFor="cwf-detailed-description" className={labelClass} style={labelStyle}>Detaylı Açıklama</label>
+              <textarea id="cwf-detailed-description" value={detailedDescription} onChange={(e) => markDirty(setDetailedDescription)(e.target.value)} rows={3} className={fieldClass} style={fieldStyle} />
             </div>
           </Section>
 
           <Section title="3. Problem, Çözüm ve Sonuç" hasError={flowHasError}>
             <div>
-              <label className={labelClass} style={labelStyle}>Tespit Edilen Problem</label>
-              <textarea value={problemDescription} onChange={(e) => markDirty(setProblemDescription)(e.target.value)} rows={2} className={fieldClass} style={fieldStyle} />
+              <label htmlFor="cwf-problem-description" className={labelClass} style={labelStyle}>Tespit Edilen Problem</label>
+              <textarea id="cwf-problem-description" value={problemDescription} onChange={(e) => markDirty(setProblemDescription)(e.target.value)} rows={2} className={fieldClass} style={fieldStyle} />
               <FieldError message={fieldErrors.problemDescription} />
             </div>
             <div>
-              <label className={labelClass} style={labelStyle}>Uygulanan Çözüm</label>
-              <textarea value={solutionDescription} onChange={(e) => markDirty(setSolutionDescription)(e.target.value)} rows={2} className={fieldClass} style={fieldStyle} />
+              <label htmlFor="cwf-solution-description" className={labelClass} style={labelStyle}>Uygulanan Çözüm</label>
+              <textarea id="cwf-solution-description" value={solutionDescription} onChange={(e) => markDirty(setSolutionDescription)(e.target.value)} rows={2} className={fieldClass} style={fieldStyle} />
               <FieldError message={fieldErrors.solutionDescription} />
             </div>
             <div>
-              <label className={labelClass} style={labelStyle}>Elde Edilen Sonuç</label>
-              <textarea value={resultDescription} onChange={(e) => markDirty(setResultDescription)(e.target.value)} rows={2} className={fieldClass} style={fieldStyle} />
+              <label htmlFor="cwf-result-description" className={labelClass} style={labelStyle}>Elde Edilen Sonuç</label>
+              <textarea id="cwf-result-description" value={resultDescription} onChange={(e) => markDirty(setResultDescription)(e.target.value)} rows={2} className={fieldClass} style={fieldStyle} />
             </div>
           </Section>
 
           <Section title="4. Maddi Kazanç" defaultOpen={false}>
             <div>
-              <label className={labelClass} style={labelStyle}>Maddi Kazanç Var mı?</label>
-              <select value={financialGainStatus} onChange={(e) => markDirty(setFinancialGainStatus)(e.target.value as FinancialGainStatus)} className={fieldClass} style={fieldStyle}>
+              <label htmlFor="cwf-financial-gain-status" className={labelClass} style={labelStyle}>Maddi Kazanç Var mı?</label>
+              <select id="cwf-financial-gain-status" value={financialGainStatus} onChange={(e) => markDirty(setFinancialGainStatus)(e.target.value as FinancialGainStatus)} className={fieldClass} style={fieldStyle}>
                 {(Object.entries(FINANCIAL_STATUS_LABELS) as [FinancialGainStatus, string][]).map(([v, l]) => <option key={v} value={v}>{l}</option>)}
               </select>
             </div>
@@ -404,12 +406,12 @@ export function ContributionWorkForm({ existing, onClose }: Props) {
               <>
                 <div className="grid grid-cols-3 gap-3">
                   <div className="col-span-2">
-                    <label className={labelClass} style={labelStyle}>Kazanç Tutarı</label>
-                    <input type="number" value={gainAmount} onChange={(e) => markDirty(setGainAmount)(e.target.value)} className={fieldClass} style={fieldStyle} />
+                    <label htmlFor="cwf-gain-amount" className={labelClass} style={labelStyle}>Kazanç Tutarı</label>
+                    <input id="cwf-gain-amount" type="number" value={gainAmount} onChange={(e) => markDirty(setGainAmount)(e.target.value)} className={fieldClass} style={fieldStyle} />
                   </div>
                   <div>
-                    <label className={labelClass} style={labelStyle}>Para Birimi</label>
-                    <select value={currency} onChange={(e) => markDirty(setCurrency)(e.target.value as ContributionCurrency)} className={fieldClass} style={fieldStyle}>
+                    <label htmlFor="cwf-currency" className={labelClass} style={labelStyle}>Para Birimi</label>
+                    <select id="cwf-currency" value={currency} onChange={(e) => markDirty(setCurrency)(e.target.value as ContributionCurrency)} className={fieldClass} style={fieldStyle}>
                       <option value="TRY">TRY</option>
                       <option value="USD">USD</option>
                       <option value="EUR">EUR</option>
@@ -418,8 +420,8 @@ export function ContributionWorkForm({ existing, onClose }: Props) {
                 </div>
 
                 <div>
-                  <label className={labelClass} style={labelStyle}>Kazanç Periyodu</label>
-                  <select value={gainPeriod} onChange={(e) => markDirty(setGainPeriod)(e.target.value as GainPeriod)} className={fieldClass} style={fieldStyle}>
+                  <label htmlFor="cwf-gain-period" className={labelClass} style={labelStyle}>Kazanç Periyodu</label>
+                  <select id="cwf-gain-period" value={gainPeriod} onChange={(e) => markDirty(setGainPeriod)(e.target.value as GainPeriod)} className={fieldClass} style={fieldStyle}>
                     <option value="">Seçiniz</option>
                     {(Object.entries(GAIN_PERIOD_LABELS) as [GainPeriod, string][]).map(([v, l]) => <option key={v} value={v}>{l}</option>)}
                   </select>
@@ -431,16 +433,16 @@ export function ContributionWorkForm({ existing, onClose }: Props) {
           <Section title="5. Zamandan Kazanç" defaultOpen={false}>
             <div className="grid grid-cols-3 gap-3">
               <div>
-                <label className={labelClass} style={labelStyle}>Önceki İşlem Süresi</label>
-                <input type="number" value={previousDuration} onChange={(e) => markDirty(setPreviousDuration)(e.target.value)} className={fieldClass} style={fieldStyle} />
+                <label htmlFor="cwf-previous-duration" className={labelClass} style={labelStyle}>Önceki İşlem Süresi</label>
+                <input id="cwf-previous-duration" type="number" value={previousDuration} onChange={(e) => markDirty(setPreviousDuration)(e.target.value)} className={fieldClass} style={fieldStyle} />
               </div>
               <div>
-                <label className={labelClass} style={labelStyle}>Yeni İşlem Süresi</label>
-                <input type="number" value={newDuration} onChange={(e) => markDirty(setNewDuration)(e.target.value)} className={fieldClass} style={fieldStyle} />
+                <label htmlFor="cwf-new-duration" className={labelClass} style={labelStyle}>Yeni İşlem Süresi</label>
+                <input id="cwf-new-duration" type="number" value={newDuration} onChange={(e) => markDirty(setNewDuration)(e.target.value)} className={fieldClass} style={fieldStyle} />
               </div>
               <div>
-                <label className={labelClass} style={labelStyle}>Süre Birimi</label>
-                <select value={durationUnit} onChange={(e) => markDirty(setDurationUnit)(e.target.value as ContributionTimeUnit)} className={fieldClass} style={fieldStyle}>
+                <label htmlFor="cwf-duration-unit" className={labelClass} style={labelStyle}>Süre Birimi</label>
+                <select id="cwf-duration-unit" value={durationUnit} onChange={(e) => markDirty(setDurationUnit)(e.target.value as ContributionTimeUnit)} className={fieldClass} style={fieldStyle}>
                   {(Object.entries(TIME_UNIT_LABELS) as [ContributionTimeUnit, string][]).map(([v, l]) => <option key={v} value={v}>{l}</option>)}
                 </select>
               </div>
@@ -454,8 +456,8 @@ export function ContributionWorkForm({ existing, onClose }: Props) {
             )}
 
             <div>
-              <label className={labelClass} style={labelStyle}>Tekrar Periyodu</label>
-              <select value={repeatPeriod} onChange={(e) => markDirty(setRepeatPeriod)(e.target.value as RepeatPeriod)} className={fieldClass} style={fieldStyle}>
+              <label htmlFor="cwf-repeat-period" className={labelClass} style={labelStyle}>Tekrar Periyodu</label>
+              <select id="cwf-repeat-period" value={repeatPeriod} onChange={(e) => markDirty(setRepeatPeriod)(e.target.value as RepeatPeriod)} className={fieldClass} style={fieldStyle}>
                 <option value="">Seçiniz</option>
                 {(Object.entries(REPEAT_PERIOD_LABELS) as [RepeatPeriod, string][]).map(([v, l]) => <option key={v} value={v}>{l}</option>)}
               </select>
@@ -476,42 +478,42 @@ export function ContributionWorkForm({ existing, onClose }: Props) {
                 <div key={i} className="rounded-md p-3" style={{ border: "1px solid var(--border)" }}>
                   <div className="mb-2 flex items-center justify-between">
                     <span className="text-xs font-semibold" style={{ color: "var(--text-secondary)" }}>Kazanım {i + 1}</span>
-                    <button type="button" onClick={() => removeGain(i)} style={{ color: "var(--text-muted)" }}>
+                    <button type="button" onClick={() => removeGain(i)} aria-label={`Kazanım ${i + 1} kaldır`} style={{ color: "var(--text-muted)" }}>
                       <Trash2 size={14} strokeWidth={2} />
                     </button>
                   </div>
                   <div className="grid grid-cols-2 gap-3">
                     <div>
-                      <label className={labelClass} style={labelStyle}>Kazanım Türü</label>
-                      <select value={gain.gainType} onChange={(e) => updateGain(i, { gainType: e.target.value as OtherGainType })} className={fieldClass} style={fieldStyle}>
+                      <label htmlFor={`cwf-gain-${i}-type`} className={labelClass} style={labelStyle}>Kazanım Türü</label>
+                      <select id={`cwf-gain-${i}-type`} value={gain.gainType} onChange={(e) => updateGain(i, { gainType: e.target.value as OtherGainType })} className={fieldClass} style={fieldStyle}>
                         {(Object.entries(GAIN_TYPE_LABELS) as [OtherGainType, string][]).map(([v, l]) => <option key={v} value={v}>{l}</option>)}
                       </select>
                     </div>
                     <div>
-                      <label className={labelClass} style={labelStyle}>Ölçüm Birimi</label>
-                      <input value={gain.unit ?? ""} onChange={(e) => updateGain(i, { unit: e.target.value })} className={fieldClass} style={fieldStyle} />
+                      <label htmlFor={`cwf-gain-${i}-unit`} className={labelClass} style={labelStyle}>Ölçüm Birimi</label>
+                      <input id={`cwf-gain-${i}-unit`} value={gain.unit ?? ""} onChange={(e) => updateGain(i, { unit: e.target.value })} className={fieldClass} style={fieldStyle} />
                     </div>
                     {gain.gainType === "other" && (
                       <div className="col-span-2">
-                        <label className={labelClass} style={labelStyle}>Türü Açıklayın</label>
-                        <input value={gain.gainTypeOtherNote ?? ""} onChange={(e) => updateGain(i, { gainTypeOtherNote: e.target.value })} className={fieldClass} style={fieldStyle} />
+                        <label htmlFor={`cwf-gain-${i}-type-other-note`} className={labelClass} style={labelStyle}>Türü Açıklayın</label>
+                        <input id={`cwf-gain-${i}-type-other-note`} value={gain.gainTypeOtherNote ?? ""} onChange={(e) => updateGain(i, { gainTypeOtherNote: e.target.value })} className={fieldClass} style={fieldStyle} />
                       </div>
                     )}
                     <div>
-                      <label className={labelClass} style={labelStyle}>Önceki Değer</label>
-                      <input type="number" value={gain.previousValue ?? ""} onChange={(e) => updateGain(i, { previousValue: e.target.value === "" ? undefined : Number(e.target.value) })} className={fieldClass} style={fieldStyle} />
+                      <label htmlFor={`cwf-gain-${i}-previous-value`} className={labelClass} style={labelStyle}>Önceki Değer</label>
+                      <input id={`cwf-gain-${i}-previous-value`} type="number" value={gain.previousValue ?? ""} onChange={(e) => updateGain(i, { previousValue: e.target.value === "" ? undefined : Number(e.target.value) })} className={fieldClass} style={fieldStyle} />
                     </div>
                     <div>
-                      <label className={labelClass} style={labelStyle}>Sonraki Değer</label>
-                      <input type="number" value={gain.nextValue ?? ""} onChange={(e) => updateGain(i, { nextValue: e.target.value === "" ? undefined : Number(e.target.value) })} className={fieldClass} style={fieldStyle} />
+                      <label htmlFor={`cwf-gain-${i}-next-value`} className={labelClass} style={labelStyle}>Sonraki Değer</label>
+                      <input id={`cwf-gain-${i}-next-value`} type="number" value={gain.nextValue ?? ""} onChange={(e) => updateGain(i, { nextValue: e.target.value === "" ? undefined : Number(e.target.value) })} className={fieldClass} style={fieldStyle} />
                     </div>
                     <div>
-                      <label className={labelClass} style={labelStyle}>Ölçüm Dönemi</label>
-                      <input value={gain.measurementPeriod ?? ""} onChange={(e) => updateGain(i, { measurementPeriod: e.target.value })} className={fieldClass} style={fieldStyle} />
+                      <label htmlFor={`cwf-gain-${i}-measurement-period`} className={labelClass} style={labelStyle}>Ölçüm Dönemi</label>
+                      <input id={`cwf-gain-${i}-measurement-period`} value={gain.measurementPeriod ?? ""} onChange={(e) => updateGain(i, { measurementPeriod: e.target.value })} className={fieldClass} style={fieldStyle} />
                     </div>
                     <div className="col-span-2">
-                      <label className={labelClass} style={labelStyle}>Açıklama</label>
-                      <input value={gain.description ?? ""} onChange={(e) => updateGain(i, { description: e.target.value })} className={fieldClass} style={fieldStyle} />
+                      <label htmlFor={`cwf-gain-${i}-description`} className={labelClass} style={labelStyle}>Açıklama</label>
+                      <input id={`cwf-gain-${i}-description`} value={gain.description ?? ""} onChange={(e) => updateGain(i, { description: e.target.value })} className={fieldClass} style={fieldStyle} />
                     </div>
                   </div>
                   {(amount != null || percent != null) && (

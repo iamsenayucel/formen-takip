@@ -49,7 +49,10 @@ Production build non-root Nginx üzerinde `:8080`'de çalışır. `/api/`
 `BACKEND_UPSTREAM` değerine proxy'lenir; OIDC ayarları image içine gömülmez,
 container başlangıcında `/config.js` olarak render edilir.
 
-`frontend/scripts/smoke_test_*.mjs` dosyaları package.json test runner'ına veya
-CI'a bağlı resmî bir suite değildir. Developer-specific absolute path içeren
-untracked betikler portable hale getirilmeden production Git staging'e
-alınmamalıdır.
+Eski `frontend/scripts/smoke_test_*.mjs` (46 dosya, developer-specific
+absolute path'li) kaldırılmıştır. Yerine assertion'lı bir Playwright
+kritik-yol suite'i (`frontend/scripts/smoke/*.spec.ts`, `npm run smoke`) ve
+CI-critical sayılmayan elle çalıştırılan `frontend/scripts/manual/*.mjs`
+script'leri geldi; ikisi de ekran görüntüsü dizinini repo-relative varsayılan
+veya `SMOKE_SHOT_DIR` ortam değişkeninden alır, kişisel makine path'i yoktur.
+Detay: README [Playwright Smoke Testleri](../README.md#playwright-smoke-testleri).

@@ -185,13 +185,11 @@ export function ForemanRankingCard({
         </span>
       </div>
 
-      {/* 4 kart mümkün olduğunca uzun süre yan yana kalır (bkz. görev talimatı
-          "Formen Performans Sıralaması") — xl(1280) yerine 1150px'te geçer,
-          çünkü card içi padding/font zaten compact katmanda küçülüyor. sm:
-          yerine min-[640px]: kullanılıyor: Tailwind v4 arbitrary min-[Npx]
-          variant'ları isimli breakpoint'lerden ayrı ve daha önce bir CSS
-          bloğunda üretiyor, ikisini aynı property'de karıştırmak (ör. sm: +
-          min-[1150px]:) cascade sırasını bozar — bkz. ExecutiveHero'daki not. */}
+      {/* 4 kart mümkün olduğunca uzun süre yan yana kalır: xl(1280) yerine 1150px'te
+          geçilir çünkü card içi padding/font compact katmanda zaten küçülmüş durumda.
+          sm: yerine min-[640px]: kullanılır — Tailwind v4 arbitrary min-[Npx]
+          variant'ları isimli breakpoint'lerden ayrı bir CSS bloğunda üretilir; ikisini
+          aynı property'de karıştırmak cascade sırasını bozar (bkz. ExecutiveHero'daki not). */}
       <div className="grid grid-cols-1 gap-[var(--space-card-gap)] min-[640px]:grid-cols-2 min-[1150px]:grid-cols-4">
         <RankingSection
           title="En Yüksek Performans"

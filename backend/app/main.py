@@ -4,14 +4,18 @@ from fastapi.openapi.utils import get_openapi
 from sqlalchemy import text
 
 from app.api.v1.router import api_router
+from app.core.client_ip import TrustedProxyClientIPMiddleware
 from app.core.config import get_settings
 from app.core.error_handlers import register_exception_handlers
 from app.core.errors import ServiceUnavailableError
+from app.core.logging_config import configure_logging
 from app.core.request_id import REQUEST_ID_HEADER, RequestIdMiddleware
+from app.core.security_headers import install_security_headers
 from app.db.session import SessionLocal
 from app.schemas.base import ApiResponse, CamelModel, ErrorEnvelope
 
 settings = get_settings()
+configure_logging(settings.log_level)
 
 app = FastAPI(
     title=settings.app_name,
@@ -29,6 +33,8 @@ app.add_middleware(
     expose_headers=[REQUEST_ID_HEADER],
 )
 app.add_middleware(RequestIdMiddleware)
+app.add_middleware(TrustedProxyClientIPMiddleware, trusted_proxies=settings.trusted_proxy_ips)
+install_security_headers(app, environment=settings.environment)
 
 register_exception_handlers(app)
 

@@ -39,6 +39,11 @@ class ContributionWorkFilters:
     impact_level: ImpactLevel | None = None
     financial_gain_status: FinancialGainStatus | None = None
     search: str | None = None
+    # Authorization scope'undan gelen daraltma — kullanıcının `plant_ids` query param'ından
+    # bağımsız, her zaman uygulanır. `None` = ALL (kısıtsız). Boş liste ise dahi bilerek
+    # burada tutulur (`is not None` ile kontrol edilir) — string tabanlı `plant_ids` alanının
+    # aksine, boş bir authorization scope "filtre yok" ile karıştırılmaz.
+    scope_plant_ids: list[UUID] | None = None
 
 
 @dataclass
@@ -194,6 +199,13 @@ class ContributionWorkRepository:
         for fid in unique_ids:
             self.db.add(ContributionWorkForeman(work_id=work_id, foreman_id=fid, role=solo_role))
 
+    def plant_ids_for_work(self, work_id: UUID) -> list[UUID]:
+        return list(
+            self.db.scalars(
+                select(ContributionWorkPlant.plant_id).where(ContributionWorkPlant.work_id == work_id)
+            )
+        )
+
     def sync_plants(self, work_id: UUID, plant_ids: list[UUID] | None) -> None:
         if plant_ids is None:
             return
@@ -235,6 +247,14 @@ class ContributionWorkRepository:
             query = query.where(
                 ContributionWork.id.in_(
                     select(ContributionWorkPlant.work_id).where(ContributionWorkPlant.plant_id.in_(plant_id_list))
+                )
+            )
+        if filters.scope_plant_ids is not None:
+            query = query.where(
+                ContributionWork.id.in_(
+                    select(ContributionWorkPlant.work_id).where(
+                        ContributionWorkPlant.plant_id.in_(filters.scope_plant_ids)
+                    )
                 )
             )
         if factory_id_list:

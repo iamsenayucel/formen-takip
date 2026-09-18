@@ -22,11 +22,9 @@ _IN_PROGRESS_ANALYSIS_STATUSES = ('QUEUED', 'ANALYZING', 'PLANNING', 'COLLECTING
 
 def upgrade() -> None:
     # --- Aylık rapor e-postası: claim lease ve reconciliation-required son durumu ---
-    # NOT: Değer member.value ile değil, Python enum üye ADIYLA (uppercase) eşleşir;
-    # gerekçesi için d6f8a0c2e4b7_add_report_storage_and_email_fields.py dosyasına bakın.
-    # Sonraki migration'ların bu değeri güvenle filtreleyebilmesi için ayrı commit edilir.
-    # Yeni `alembic upgrade head` tüm migration'ları tek transaction içinde çalıştırır;
-    # Postgres, enum değerinin eklendiği transaction içinde kullanılmasını yasaklar.
+    # Değer member.value değil, Python enum üye ADIYLA (uppercase) eşleşir; gerekçesi için
+    # d6f8a0c2e4b7_add_report_storage_and_email_fields.py'ye bakın. Postgres yeni enum
+    # değerinin eklendiği transaction içinde kullanılmasını yasakladığından ayrı commit edilir.
     with op.get_context().autocommit_block():
         op.execute("ALTER TYPE report_email_status ADD VALUE IF NOT EXISTS 'RECONCILIATION_REQUIRED'")
 

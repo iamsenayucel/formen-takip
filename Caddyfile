@@ -3,11 +3,42 @@
 #
 # SITE_DOMAIN=localhost, testte ACME yerine Caddy'nin internal CA'sını kullanır.
 {$SITE_DOMAIN} {
-	header {
-		Strict-Transport-Security "max-age=31536000"
-		X-Content-Type-Options "nosniff"
-		Referrer-Policy "strict-origin-when-cross-origin"
-		X-Frame-Options "DENY"
+	# X-Content-Type-Options / Referrer-Policy / X-Frame-Options / CSP / Permissions-Policy
+	# artık HER responseda frontend (default.conf.template) veya backend'in
+	# (app/core/security_headers.py) kendisi tarafından üretiliyor — Caddy burada
+	# onları BİLEREK tekrar SET ETMİYOR. Canlı testte (bu Caddyfile'ın gerçek
+	# topolojisiyle: {$SITE_DOMAIN} otomatik HTTPS + reverse_proxy + upstream AYNI
+	# header adını zaten set etmiş) hem prefix'siz `header` (set/overwrite) hem de
+	# `?` (yalnızca eksikse yaz) semantiği aynı header'ın İKİ KEZ (duplicate)
+	# yazılmasına yol açtığı tekrar edilebilir biçimde gözlendi — yalın `respond`
+	# veya upstream'in o header'ı hiç göndermediği durumlarda bu bug ortaya
+	# çıkmıyor, yalnızca "otomatik HTTPS + reverse_proxy + upstream aynı header'ı
+	# zaten set etmiş" üçlüsünde. Bu servisin gerçek deployment'ı tam olarak bu
+	# durumda olduğundan (frontend/backend artık kendi header'larını üretiyor),
+	# Caddy'nin bu 4 header için AYRICA bir directive taşıması güvenli değil.
+	#
+	# Strict-Transport-Security istisna: frontend (nginx) TLS'i hiç sonlandırmadığı
+	# için /api/ dışındaki path'lerde bunu KENDİSİ asla set etmez (bkz.
+	# default.conf.template) — o path'lerde tek kaynak burasıdır, bu yüzden
+	# yukarıdaki duplicate riski hiç oluşmaz (upstream hiç göndermiyor). /api/
+	# path'i ise backend'in kendi ürettiği (yalnızca ENVIRONMENT=production'da
+	# eklediği) Strict-Transport-Security'yi taşıyabildiğinden, oradaki duplicate
+	# riskini önlemek için Caddy'nin kendi HSTS'i yalnızca /api/ DIŞINDAKİ path'lere
+	# uygulanır. Caddy yalnızca docker-compose.prod.yml'de (`edge` servisi) devreye
+	# girdiğinden bu satır zaten yalnızca gerçek production'da çalışır — ayrıca bir
+	# ortam kontrolüne gerek yok.
+	@not_api {
+		not path /api/*
 	}
+	header @not_api {
+		Strict-Transport-Security "max-age=31536000"
+	}
+	# Caddy'nin varsayılan trusted_proxies davranışı (hiç kimseye güvenme) zaten
+	# istemcinin gönderdiği X-Forwarded-For'u yok sayıp kendi gördüğü gerçek
+	# bağlantı adresiyle değiştiriyor (elle "header_up X-Forwarded-For ..."
+	# eklemek Caddy'nin kendi uyarısına göre gereksiz — caddy validate çıktısı).
+	# frontend (nginx) bu değere kendi remote_addr'ını (Caddy'nin container
+	# IP'si) ekler; backend audit IP'sini bu zincirden app/core/client_ip.py
+	# üzerinden çözer (bkz. TRUSTED_PROXY_IPS).
 	reverse_proxy frontend:8080
 }

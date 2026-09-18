@@ -1,6 +1,7 @@
-from fastapi import Depends
+from fastapi import Depends, Request
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 
+from app.core import log_context
 from app.core.config import get_settings
 from app.core.errors import UnauthorizedError
 from app.core.oidc import OIDCConfigError, TokenValidationError, verify_access_token
@@ -11,7 +12,13 @@ _bearer_scheme = HTTPBearer(auto_error=False)
 _DEV_BYPASS_SUBJECT = "dev-demo-user"
 
 
+def _bind_subject(request: Request, subject: str) -> None:
+    request.state.subject = subject
+    log_context.bind_subject(subject)
+
+
 def get_current_identity(
+    request: Request,
     credentials: HTTPAuthorizationCredentials | None = Depends(_bearer_scheme),
 ) -> Identity:
     settings = get_settings()
@@ -19,6 +26,7 @@ def get_current_identity(
     # Yalnızca geliştirme/demo içindir. Settings, ENVIRONMENT=development dışında
     # auth_bypass=True değerini reddettiğinden production'da OIDC doğrulaması atlanamaz.
     if settings.auth_bypass and settings.environment == "development":
+        _bind_subject(request, _DEV_BYPASS_SUBJECT)
         return Identity(subject=_DEV_BYPASS_SUBJECT, claims={"name": "Demo User", "sub": _DEV_BYPASS_SUBJECT})
 
     if credentials is None:
@@ -33,4 +41,6 @@ def get_current_identity(
     if not subject:
         raise UnauthorizedError("Jeton kimlik bilgisi içermiyor.")
 
-    return Identity(subject=str(subject), claims=claims)
+    subject = str(subject)
+    _bind_subject(request, subject)
+    return Identity(subject=subject, claims=claims)

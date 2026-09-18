@@ -29,7 +29,7 @@ class MetaService:
         self, plant_ids: list[UUID] | None, factory_ids: list[UUID] | None
     ) -> dict:
         factories = self.plant_repository.list_active_factories()
-        plants = self.plant_repository.list_active_for_factories(factory_ids)
+        plants = self.plant_repository.list_active_for_factories(factory_ids, plant_ids)
         chiefs = self.chief_repository.list_active_for_filter_options(plant_ids, factory_ids)
         plant_ids_by_chief = {
             chief_id: [str(p.id) for p in plant_list]

@@ -14,8 +14,9 @@ katkı çalışması, anomali analizi/durumu ve rapor üretimiyle ilgilidir.
 Frontend React/Vite, backend FastAPI/SQLAlchemy/PostgreSQL, edge katmanı Caddy,
 statik sunum Nginx ve periyodik işler tek-instance cron scheduler ile çalışır.
 Kimlik doğrulama OIDC Authorization Code + PKCE ve backend JWT doğrulamasıyla
-sağlanır. Fine-grained backend RBAC bu release için bilinçli olarak deferred
-durumdadır.
+sağlanır. Fine-grained backend RBAC uygulanmıştır: üç rol (`FOREMAN`,
+`SUPERVISOR`, `OPERATIONS_MANAGER`), sabit permission paketleri ve
+ALL/FACTORY/PLANT veri kapsamı — bkz. [Güvenlik ve Uyum](06-security.md).
 
 ## Kurulum (Docker)
 
@@ -127,12 +128,21 @@ kullanılır. Production bu yapılandırmayı reddeder.
   verisi sentetiktir.
 - Gerçek Keycloak, SMTP, S3/CloudFront, DNS/TLS ve production PostgreSQL
   provizyonu repository dışında deployment/UAT sırasında doğrulanmalıdır.
-- Fine-grained backend RBAC ve endpoint permission enforcement deferred'dır;
-  authentication aktiftir.
-- Frontend lint/typecheck/build/audit adımları vardır, fakat bağımsız bir
-  `npm test` script'i yoktur.
+- Fine-grained backend RBAC ve endpoint permission enforcement uygulanmıştır
+  (üç rol, sabit permission paketi, ALL/FACTORY/PLANT veri kapsamı) — bkz.
+  [Güvenlik ve Uyum](06-security.md). Rapor indirme sahiplik değil yalnızca
+  veri kapsamı ile korunur; kapsam içindeki bir raporu, onu oluşturmamış
+  başka bir kapsam-eşleşen kullanıcı da indirebilir — bilinçli bir
+  basitleştirmedir.
+- Frontend lint/typecheck/build/audit adımlarına ek olarak Vitest birim/
+  bileşen test suite'i (`npm run test`) ve ayrı, CI'a bağlı olmayan bir
+  Playwright kritik-yol smoke suite'i (`frontend/scripts/smoke/`) vardır.
 - Scheduler tek instance çalıştırılmalıdır; dağıtık scheduler lock'u yoktur.
-- Merkezi metrics, tracing, alerting ve repository içi otomatik CI/CD pipeline
-  uygulanmamıştır.
+- `.github/workflows/` altında backend/frontend lint+test CI'ı ve statik
+  güvenlik taraması (gitleaks, pip-audit, CodeQL) vardır; PR merge'ini
+  yalnızca GitHub branch protection'da required check seçilirse bloklar.
+  Gerçek otomatik **deploy** yoktur (`deploy.yml` bilerek iskelet). Merkezi
+  metrics/tracing/alerting (OpenTelemetry/Prometheus) uygulanmamıştır;
+  mevcut olan yapılandırılmış JSON stdout log + request-id korelasyonudur.
 - Sentetik Tespitler üreticisi bugün OEE dışındaki beş üretim KPI'sı için
   senaryo üretir; OEE resmî performans KPI setine ve skorlamaya dahildir.

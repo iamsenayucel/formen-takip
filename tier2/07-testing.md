@@ -7,13 +7,21 @@ cd backend
 .venv/Scripts/python.exe -m pytest -q
 ```
 
-Güncel doğrulanmış sonuç:
+Bu final teslimat denetimi sırasında (2026-09-17) `.venv/Scripts/python.exe -m
+pytest -q` ile boş bir Postgres container'ına karşı taze migration + full
+suite koşusuyla doğrulanan sonuç:
 
 ```text
-1063 passed
-31 skipped
+1189 passed
+32 skipped
 0 failed
+(458.90s, 0:07:38)
 ```
+
+Test sayısı RBAC/logging/DB-pool gibi yeni testler eklendikçe büyümeye devam
+ediyor; bu nedenle burada tek seferlik bir enstantane olarak tutulur — CI'da
+sabit bir hedef sayı yerine yalnızca "collection tamamen kırıldı mı" kaba
+tabanı (`< 100`) kontrol edilir, bkz. [CI/CD](../README.md#cicd).
 
 Test paketi `backend/tests/unit` ve `backend/tests/integration` altında
 toplanır. Unit kapsamı ağırlıklı olarak DB'sizdir; integration kapsamı
@@ -54,18 +62,28 @@ Frontend için repository'de bulunan otomatik komutlar:
 ```bash
 cd frontend
 npm run lint
-npx tsc -b
+npm run typecheck
+npm run test    # Vitest
 npm run build
 npm audit
 ```
 
-Lint, TypeScript validation, Vite production build ve dependency audit
-mevcuttur. `package.json` içinde bağımsız `npm test`, Vitest/Jest component
-suite'i veya CI'a bağlı Playwright runner'ı yoktur.
+Lint (oxlint), TypeScript validation, **Vitest birim/bileşen suite'i (25
+dosya, 259 geçen test)**, Vite production build ve dependency audit mevcuttur.
+`frontend-ci.yml` bu dört adımı (lint/typecheck/test/build) her PR'da çalıştırır.
 
-`frontend/scripts/smoke_test_*.mjs` dosyaları ad-hoc manuel betiklerdir.
-Developer-specific absolute path içeren untracked olanlar portable hale
-getirilmeden resmî test tooling'i veya production staging girdisi sayılmaz.
+Ayrıca, CI'a **bilerek bağlanmamış**, gerçek `expect()` assertion'lı bir
+Playwright kritik-yol smoke suite'i vardır
+(`frontend/scripts/smoke/*.spec.ts`, `frontend/playwright.config.ts`,
+`npm run smoke`) — dashboard/tesis/grup/formen/KPI/Tespitler/Vardiya Analizi
+navigasyonunu ve konsol/API hata yokluğunu `AUTH_BYPASS` dev modunda doğrular;
+gerçek Keycloak login veya RBAC'ı kapsamaz. `frontend/scripts/manual/*.mjs`
+ise CI-critical sayılmayan, elle çalıştırılan görsel/derin senaryo
+script'leridir (RBAC nav/403 dahil — `smoke_test_rbac.mjs`, gerçek local
+Keycloak login gerektirir). Ortak yardımcılar (`smoke_helpers.mjs`) ekran
+görüntüsü dizinini repo-relative varsayılan veya `SMOKE_SHOT_DIR` ortam
+değişkeninden alır; kişisel makine path'i yoktur. Detay: README
+[Playwright Smoke Testleri](../README.md#playwright-smoke-testleri).
 
 ## Veritabanı Şeması
 
@@ -153,6 +171,11 @@ alembic heads
 → health/readiness/proxy smoke
 ```
 
-Repository içinde otomatik GitHub Actions, GitLab CI veya eşdeğer pipeline
-tanımı yoktur. Bu gate'lerin manuel mi yoksa kurumsal harici CI ile mi
-enforce edileceği IT teslim sürecinde belirlenmelidir.
+Repository içinde `.github/workflows/` altında otomatik CI tanımlıdır
+(backend lint+full pytest, frontend lint+typecheck+test+build, gitleaks
+secret scan, pip-audit — non-blocking, CodeQL — informational). Bu, yalnızca
+GitHub *Branch protection*'da required status check olarak seçilirse PR
+merge'ini bloklar; bu seçim workflow dosyasıyla otomatik garanti edilmez ve
+IT teslim sürecinde ayrıca yapılandırılmalıdır. Gerçek otomatik **deploy**
+yoktur (`deploy.yml` bilerek iskelet, `exit 1`). Detay: README
+[CI/CD](../README.md#cicd).

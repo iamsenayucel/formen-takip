@@ -3,12 +3,14 @@ from uuid import UUID
 from fastapi import APIRouter, Depends, Query
 from sqlalchemy.orm import Session
 
-from app.api.deps import get_current_identity
+from app.api.authz_deps import assert_plant_in_scope, require_permission, scoped_filters
 from app.core.errors import ShiftAnalysisNotFoundError
 from app.core.pagination import cursor_envelope
+from app.core.permissions import Permission
 from app.db.session import get_db
+from app.schemas.authz import AuthContext
 from app.schemas.base import ApiResponse, CursorResponse
-from app.schemas.common import CursorParams, Filters, common_filters, cursor_params
+from app.schemas.common import CursorParams, Filters, cursor_params
 from app.schemas.dashboard import KpiSummaryItem
 from app.schemas.plant import (
     ForemanShiftMatrixResponse,
@@ -26,6 +28,8 @@ from app.services.plant_service import PlantService
 
 router = APIRouter(prefix="/plants", tags=["plants"])
 
+_require_performance = require_permission(Permission.PERFORMANCE_VIEW)
+
 
 @router.get("", response_model=CursorResponse[PlantListItem])
 def list_plants(
@@ -35,9 +39,9 @@ def list_plants(
     sort_by: str = Query("sequence", pattern="^(sequence|name|factory|active_foreman_count|score|level)$"),
     sort_dir: str = Query("asc", pattern="^(asc|desc)$"),
     page: CursorParams = Depends(cursor_params),
-    filters: Filters = Depends(common_filters),
+    filters: Filters = Depends(scoped_filters),
     db: Session = Depends(get_db),
-    _=Depends(get_current_identity),
+    _ctx: AuthContext = Depends(_require_performance),
 ) -> CursorResponse[PlantListItem]:
     service = PlantService(db)
     result = service.get_list(search, factory_id, is_active, sort_by, sort_dir, page, filters)
@@ -45,39 +49,50 @@ def list_plants(
 
 
 @router.get("/{plant_id}", response_model=ApiResponse[PlantDetail])
-def get_plant(plant_id: UUID, db: Session = Depends(get_db), _=Depends(get_current_identity)) -> ApiResponse[PlantDetail]:
+def get_plant(
+    plant_id: UUID, db: Session = Depends(get_db), ctx: AuthContext = Depends(_require_performance)
+) -> ApiResponse[PlantDetail]:
+    assert_plant_in_scope(ctx, plant_id)
     service = PlantService(db)
     return {"data": service.get_detail(plant_id)}
 
 
 @router.get("/{plant_id}/summary", response_model=ApiResponse[PlantSummary])
 def plant_summary(
-    plant_id: UUID, filters: Filters = Depends(common_filters), db: Session = Depends(get_db), _=Depends(get_current_identity)
+    plant_id: UUID, filters: Filters = Depends(scoped_filters), db: Session = Depends(get_db),
+    ctx: AuthContext = Depends(_require_performance),
 ) -> ApiResponse[PlantSummary]:
+    assert_plant_in_scope(ctx, plant_id)
     service = PlantService(db)
     return {"data": service.get_summary(plant_id, filters)}
 
 
 @router.get("/{plant_id}/kpis", response_model=ApiResponse[list[KpiSummaryItem]])
 def plant_kpis(
-    plant_id: UUID, filters: Filters = Depends(common_filters), db: Session = Depends(get_db), _=Depends(get_current_identity)
+    plant_id: UUID, filters: Filters = Depends(scoped_filters), db: Session = Depends(get_db),
+    ctx: AuthContext = Depends(_require_performance),
 ) -> ApiResponse[list[KpiSummaryItem]]:
+    assert_plant_in_scope(ctx, plant_id)
     service = PlantService(db)
     return {"data": service.get_kpis(plant_id, filters)["items"]}
 
 
 @router.get("/{plant_id}/shifts", response_model=ApiResponse[list[PlantShiftItem]])
 def plant_shifts(
-    plant_id: UUID, filters: Filters = Depends(common_filters), db: Session = Depends(get_db), _=Depends(get_current_identity)
+    plant_id: UUID, filters: Filters = Depends(scoped_filters), db: Session = Depends(get_db),
+    ctx: AuthContext = Depends(_require_performance),
 ) -> ApiResponse[list[PlantShiftItem]]:
+    assert_plant_in_scope(ctx, plant_id)
     service = PlantService(db)
     return {"data": service.get_shifts(plant_id, filters)["items"]}
 
 
 @router.get("/{plant_id}/chiefs", response_model=ApiResponse[list[PlantChiefItem]])
 def plant_chiefs(
-    plant_id: UUID, filters: Filters = Depends(common_filters), db: Session = Depends(get_db), _=Depends(get_current_identity)
+    plant_id: UUID, filters: Filters = Depends(scoped_filters), db: Session = Depends(get_db),
+    ctx: AuthContext = Depends(_require_performance),
 ) -> ApiResponse[list[PlantChiefItem]]:
+    assert_plant_in_scope(ctx, plant_id)
     service = PlantService(db)
     return {"data": service.get_chiefs(plant_id, filters)["items"]}
 
@@ -86,10 +101,11 @@ def plant_chiefs(
 def plant_foreman_shift_matrix(
     plant_id: UUID,
     kpi_id: UUID = Query(...),
-    filters: Filters = Depends(common_filters),
+    filters: Filters = Depends(scoped_filters),
     db: Session = Depends(get_db),
-    _=Depends(get_current_identity),
+    ctx: AuthContext = Depends(_require_performance),
 ) -> ApiResponse[ForemanShiftMatrixResponse]:
+    assert_plant_in_scope(ctx, plant_id)
     matrix = shift_analysis.build_foreman_shift_matrix(db, filters, plant_id, kpi_id)
     if matrix is None:
         raise ShiftAnalysisNotFoundError("Bu tesis/KPI kombinasyonu için formen-vardiya karşılaştırması yapılacak veri bulunamadı.")
@@ -132,10 +148,11 @@ def plant_foreman_shift_matrix(
 def plant_foremen(
     plant_id: UUID,
     page: CursorParams = Depends(cursor_params),
-    filters: Filters = Depends(common_filters),
+    filters: Filters = Depends(scoped_filters),
     db: Session = Depends(get_db),
-    _=Depends(get_current_identity),
+    ctx: AuthContext = Depends(_require_performance),
 ) -> CursorResponse[PlantForemanItem]:
+    assert_plant_in_scope(ctx, plant_id)
     service = PlantService(db)
     result = service.get_foremen(plant_id, page, filters)
     return cursor_envelope(result)

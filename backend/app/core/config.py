@@ -10,6 +10,7 @@ class Settings(BaseSettings):
     app_name: str = "Formen Performans Takip Sistemi"
     environment: str = "development"
     debug: bool = True
+    log_level: str = "INFO"
 
     # Yalnızca geliştirme/demo ortamı içindir; get_current_identity içinde OIDC token
     # doğrulamasını atlar. Aşağıdaki _forbid_auth_bypass_outside_development doğrulayıcısı
@@ -17,6 +18,21 @@ class Settings(BaseSettings):
     auth_bypass: bool = False
 
     database_url: str = "postgresql+psycopg://formen:formen@localhost:5433/formen_takip"
+
+    # SQLAlchemy connection pool (app/db/session.py) varsayılanlarıyla aynı
+    # (pool_size=5, max_overflow=10) — "production optimum değer" iddiası değil,
+    # örtük davranışı configurable hale getirir. Gerçek production değeri worker
+    # sayısı, PostgreSQL max_connections ve ölçülen yükle doğrulanmalı (bkz. README
+    # "DB Connection Pool").
+    db_pool_size: int = 5
+    db_max_overflow: int = 10
+    # Havuzda boş bağlantı yokken yeni bir checkout'un bekleyeceği azami süre (saniye).
+    # SQLAlchemy varsayılanıyla aynıdır; aşılırsa TimeoutError fırlatılır.
+    db_pool_timeout: int = 30
+    # Bu süreden uzun açık kalan bağlantılar sonraki checkout'ta yeniden kurulur.
+    # SQLAlchemy varsayılanı sınırsız (-1); 1800sn, proxy/LB'nin sessizce kapattığı
+    # bayat bağlantılara karşı ucuz bir güvenlik payı. pool_pre_ping bundan bağımsız.
+    db_pool_recycle: int = 1800
 
     # Red Hat SSO / Keycloak (OIDC) — bkz. README "Authentication Architecture".
     # Backend yalnızca kaynak sunucu (resource server) rolündedir: kendi token'ını
@@ -35,6 +51,8 @@ class Settings(BaseSettings):
     timezone: str = "Europe/Istanbul"
 
     cors_origins: list[str] = ["http://localhost:5173"]
+
+    trusted_proxy_ips: str = "127.0.0.1"
 
     sap_base_url: str | None = None
     sap_client_id: str | None = None
@@ -148,6 +166,20 @@ class Settings(BaseSettings):
         return self
 
     @model_validator(mode="after")
+    def _validate_db_pool_settings(self) -> "Settings":
+        if self.db_pool_size < 1:
+            raise ValueError("DB_POOL_SIZE en az 1 olmalıdır.")
+        if self.db_max_overflow < 0:
+            raise ValueError("DB_MAX_OVERFLOW negatif olamaz.")
+        if self.db_pool_timeout < 1:
+            raise ValueError("DB_POOL_TIMEOUT en az 1 saniye olmalıdır.")
+        if self.db_pool_recycle < -1 or self.db_pool_recycle == 0:
+            raise ValueError(
+                "DB_POOL_RECYCLE -1 (devre dışı) olmalı veya pozitif saniye sayısı olmalıdır."
+            )
+        return self
+
+    @model_validator(mode="after")
     def _require_explicit_test_database_when_environment_test(self) -> "Settings":
         # ENVIRONMENT=test, kendi geçici Postgres container'ını hazırlayan entegrasyon
         # testlerine ayrılmıştır (tests/integration/_ephemeral_db.py) ve normal
@@ -162,14 +194,10 @@ class Settings(BaseSettings):
             )
         return self
 
-    # NOT: report-storage için OIDC'deki gibi bir model_validator (uygulama başlangıcında
-    # tüm Settings() constructor'ında fail-closed) BİLEREK kullanılmıyor. OIDC her
-    # request'i etkileyen cross-cutting bir concern olduğu için app-wide fail-closed
-    # doğru; ama rapor storage yalnızca formen aylık rapor akışını etkiler — AWS henüz
-    # provizyonlanmadıysa bu validator tüm backend'i (dashboard, KPI, vb. ilgisiz
-    # özellikler dahil) ayağa kalkamaz hale getirirdi. Bunun yerine fail-closed kontrolü
-    # yalnızca rapor storage'ın gerçekten kullanıldığı çağrı noktasında yapılır —
-    # bkz. app/services/storage/factory.py::get_report_storage.
+    # report-storage bilerek OIDC'deki gibi constructor-level fail-closed kullanmıyor:
+    # OIDC app-wide cross-cutting bir concern ama report storage yalnızca aylık rapor
+    # akışını etkiler — AWS provizyonlanmadan tüm backend'i ayağa kaldırmamalı. Fail-closed
+    # kontrolü bunun yerine kullanım noktasında yapılır, bkz. app/services/storage/factory.py.
 
 
 @lru_cache

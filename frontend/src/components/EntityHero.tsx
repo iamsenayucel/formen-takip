@@ -21,8 +21,8 @@ export interface EntityHeroStatusNote {
 }
 
 // Tesis / Şef / Formen detay sayfalarındaki ortak "identity + ana skor" hero'su.
-// Phase 1'in ExecutiveHero'suyla aynı tipografi/renk diliyle (data-primary skor,
-// status token'ları) — ama tek bir entity'nin kimlik bilgisini taşır.
+// ExecutiveHero ile aynı tipografi/renk diliyle (data-primary skor, status
+// token'ları) — ama tek bir entity'nin kimlik bilgisini taşır.
 export function EntityHero({
   eyebrow,
   title,

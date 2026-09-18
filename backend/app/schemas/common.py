@@ -1,4 +1,4 @@
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import date, timedelta
 from uuid import UUID
 
@@ -48,6 +48,36 @@ def common_filters(
         shift_ids=parse_uuid_list(shift_ids),
         kpi_ids=parse_uuid_list(kpi_ids),
         foreman_ids=parse_uuid_list(foreman_ids),
+    )
+
+
+def narrow_ids(requested: list[UUID] | None, scope: frozenset[UUID] | None) -> list[UUID] | None:
+    """Bir istenen id listesini authorization scope'u ile kesiştirir.
+
+    `scope=None` -> kısıtlama yok (ALL), `requested` aynen döner.
+    `requested=None` -> kullanıcı filtre vermemiş, scope'un tamamı varsayılan olur.
+    İkisi de doluysa kesişim döner ve bu **boş liste olabilir** (istenen id'lerin hiçbiri
+    scope içinde değil) — bu, "filtre yok" ile karıştırılmamalıdır; tüketen taraflar
+    (ör. analytics._apply_filters) `is not None` kontrolü yapmalı, truthiness değil.
+    """
+    if scope is None:
+        return requested
+    if requested is None:
+        return sorted(scope, key=str)
+    return [v for v in requested if v in scope]
+
+
+def narrow_filters(filters: Filters, plant_ids_scope: frozenset[UUID] | None) -> Filters:
+    """`Filters`'ı authorization scope'una göre daraltır. Scope kısıtlıysa (PLANT/FACTORY
+    kaynaklı, genişletilmiş plant_ids seti) `factory_ids` bilinçli olarak yok sayılır —
+    tek doğruluk ekseni `plant_ids`'tir, aksi halde iki eksen arasında tutarsızlık/bypass
+    riski oluşur (bkz. app/api/authz_deps.py::_expand_plant_ids)."""
+    if plant_ids_scope is None:
+        return filters
+    return replace(
+        filters,
+        plant_ids=narrow_ids(filters.plant_ids, plant_ids_scope),
+        factory_ids=None,
     )
 
 

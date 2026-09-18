@@ -26,6 +26,41 @@ server {
     # returns a 502 rather than preventing nginx from starting at all.
     resolver 127.0.0.11 valid=30s;
 
+    # Tek tanım noktası: CSP metni aşağıdaki 4 location'da (config.js, index.html,
+    # assets, SPA fallback) tekrar tekrar yazılmak yerine buradan referans alınır.
+    # /api/ location'ı bilinçli olarak buraya dahil değil — o location kendi
+    # add_header'ını tanımlamadığından hiçbir header'ı miras almaz ve backend'in
+    # (app/core/security_headers.py) kendi ürettiği header'lar hiçbir değişikliğe
+    # uğramadan olduğu gibi geçer; aksi halde her iki katman da aynı response'a
+    # farklı bir Content-Security-Policy eklemiş olurdu.
+    #
+    # script-src'teki hash, index.html'deki tema-flash-önleme inline <script>'inin
+    # (yalnız bu tek blok) SHA-256'sıdır — Vite production build'i bu script'i
+    # minify/değiştirmeden bırakır (dist/index.html ile doğrulandı). O script
+    # satırları değişirse bu hash yeniden hesaplanmalıdır, aksi halde CSP onu
+    # sessizce bloklar (script-src'te 'unsafe-inline' KULLANILMIYOR — script-src'te
+    # dinamik olmayan tek bir statik blok olduğu için hash mümkün ve tercih edildi).
+    #
+    # style-src'teki 'unsafe-inline' bilinçli bir istisnadır: React ağacında 850+
+    # adet dinamik `style={{...}}` (Recharts grafikleri, tema renkleri vb.) kullanılıyor;
+    # değerler her render'da değişebildiğinden hash mümkün değil, ve CSP nonce'ları
+    # yalnızca <style>/<link> öğelerine uygulanır — style="" attribute'una browser
+    # tarafında nonce desteği yoktur. Bu yüzden style-src için 'unsafe-inline'
+    # kaçınılmazdır (script-src'te DEĞİL, yalnızca style-src'te).
+    #
+    # connect-src'teki __OIDC_ISSUER_ORIGIN__, oidc-client-ts'in token/discovery
+    # çağrılarını tarayıcıdan DOĞRUDAN (nginx proxy'si olmadan) issuer origin'ine
+    # yaptığı için gereklidir. Bilerek VITE_OIDC_ISSUER_URL'in TAMAMI değil yalnız
+    # origin'i (scheme://host:port) kullanılıyor: CSP source-expression'da path
+    # verilirse (ör. "http://keycloak:8081/realms/formen-dev") tarayıcı yalnız o
+    # path'e TAM eşleşen isteklere izin veriyor — gerçek Chromium'da doğrulandı,
+    # discovery isteği (".../realms/formen-dev/.well-known/openid-configuration")
+    # farklı bir alt path olduğu için engellenip CSP violation üretti. envsubst
+    # burada path'siz origin'i BİLEMEZ (yalnız literal ${VAR} substitution yapar);
+    # bu yüzden origin, container başlarken 40-runtime-config.sh tarafından
+    # VITE_OIDC_ISSUER_URL'den hesaplanıp bu placeholder'ın yerine yazılıyor.
+    set $security_headers_csp "default-src 'self'; base-uri 'self'; object-src 'none'; frame-ancestors 'none'; form-action 'self'; script-src 'self' 'sha256-pScmX0iOimHvyoiSCr8uGjX63a9RRgXHmXoLoyzMNsU='; style-src 'self' 'unsafe-inline'; img-src 'self'; font-src 'self'; connect-src 'self' __OIDC_ISSUER_ORIGIN__; frame-src 'none'";
+
     location /api/ {
         # No path after the variable: when proxy_pass's target is a
         # variable, nginx does NOT do its usual "replace the matched
@@ -59,6 +94,11 @@ server {
 
     location = /config.js {
         add_header Cache-Control "no-store";
+        add_header X-Content-Type-Options "nosniff" always;
+        add_header X-Frame-Options "DENY" always;
+        add_header Referrer-Policy "strict-origin-when-cross-origin" always;
+        add_header Permissions-Policy "camera=(), microphone=(), geolocation=(), payment=(), usb=()" always;
+        add_header Content-Security-Policy $security_headers_csp always;
     }
 
     # The HTML shell selects the content-hashed JavaScript bundle. It must be
@@ -68,16 +108,31 @@ server {
         add_header Cache-Control "no-store, no-cache, must-revalidate";
         add_header Pragma "no-cache";
         add_header Expires "0";
+        add_header X-Content-Type-Options "nosniff" always;
+        add_header X-Frame-Options "DENY" always;
+        add_header Referrer-Policy "strict-origin-when-cross-origin" always;
+        add_header Permissions-Policy "camera=(), microphone=(), geolocation=(), payment=(), usb=()" always;
+        add_header Content-Security-Policy $security_headers_csp always;
     }
 
     # Vite asset names contain a content hash, so these files are safe to cache
     # indefinitely. A new deployment points index.html at a new filename.
     location /assets/ {
         add_header Cache-Control "public, max-age=31536000, immutable";
+        add_header X-Content-Type-Options "nosniff" always;
+        add_header X-Frame-Options "DENY" always;
+        add_header Referrer-Policy "strict-origin-when-cross-origin" always;
+        add_header Permissions-Policy "camera=(), microphone=(), geolocation=(), payment=(), usb=()" always;
+        add_header Content-Security-Policy $security_headers_csp always;
         try_files $uri =404;
     }
 
     location / {
+        add_header X-Content-Type-Options "nosniff" always;
+        add_header X-Frame-Options "DENY" always;
+        add_header Referrer-Policy "strict-origin-when-cross-origin" always;
+        add_header Permissions-Policy "camera=(), microphone=(), geolocation=(), payment=(), usb=()" always;
+        add_header Content-Security-Policy $security_headers_csp always;
         try_files $uri $uri/ /index.html;
     }
 }

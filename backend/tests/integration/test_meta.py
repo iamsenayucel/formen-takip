@@ -96,11 +96,10 @@ class TestMetaFilters:
         assert [p["id"] for p in body["plants"]] == expected_plants
         assert {c["id"] for c in body["chiefs"]} == expected_chief_ids
 
-    def test_plant_ids_narrows_chiefs_but_not_top_level_plants(self, client, auth_headers, db_session):
-        all_active_plant_ids = [
-            str(p.id) for p in db_session.scalars(select(Plant).where(Plant.is_active.is_(True)).order_by(Plant.sequence_number))
-        ]
-
+    def test_plant_ids_narrows_both_chiefs_and_top_level_plants(self, client, auth_headers, db_session):
+        # RBAC scope-daraltmasının doğru çalışabilmesi için `plant_ids` `plants` listesini de
+        # daraltır; aksi halde scope dışı tesisler filtre çubuğunda görünebilir (bkz. README
+        # "Yetkilendirme (RBAC)").
         chief_with_multiple_plants = None
         for c in db_session.scalars(select(Chief).where(Chief.is_active.is_(True))):
             zone_plants = list(db_session.scalars(select(Plant).where(Plant.chief_id == c.id)))
@@ -116,13 +115,16 @@ class TestMetaFilters:
         assert resp.status_code == 200
         body = unwrap(resp)
 
-        assert [p["id"] for p in body["plants"]] == all_active_plant_ids
+        assert [p["id"] for p in body["plants"]] == [str(filtering_plant.id)]
 
         assert [c["id"] for c in body["chiefs"]] == [str(chief.id)]
         assert set(body["chiefs"][0]["plantIds"]) == expected_full_zone_plant_ids
         assert len(body["chiefs"][0]["plantIds"]) == len(zone_plants)
 
-    def test_conflicting_factory_and_plant_ids_precedence(self, client, auth_headers, db_session):
+    def test_conflicting_factory_and_plant_ids_intersect_to_empty_plants(self, client, auth_headers, db_session):
+        # `plants` hem factory_ids hem plant_ids ile AND'lenir; çelişen bir fabrika/tesis
+        # kombinasyonu (tesis o fabrikaya ait değilse) bu yüzden boş sonuç verir. `chiefs`
+        # ise plant_ids'i factory_ids'e önceliklendirir.
         factories = list(db_session.scalars(select(Factory).where(Factory.is_active.is_(True)).order_by(Factory.code)))
         assert len(factories) >= 2, "test iki farklı fabrika gerektiriyor"
         factory_a, factory_b = factories[0], factories[1]
@@ -132,13 +134,6 @@ class TestMetaFilters:
         ).first()
         expected_chief_id = str(plant_in_a.chief_id)
 
-        expected_plants_b = [
-            str(p.id) for p in db_session.scalars(
-                select(Plant).where(Plant.is_active.is_(True), Plant.factory_id == factory_b.id)
-                .order_by(Plant.sequence_number)
-            )
-        ]
-
         resp = client.get(
             "/api/v1/meta/filters", headers=auth_headers,
             params={"factory_ids": str(factory_b.id), "plant_ids": str(plant_in_a.id)},
@@ -146,7 +141,7 @@ class TestMetaFilters:
         assert resp.status_code == 200
         body = unwrap(resp)
 
-        assert [p["id"] for p in body["plants"]] == expected_plants_b
+        assert body["plants"] == []
         assert [c["id"] for c in body["chiefs"]] == [expected_chief_id]
 
     def test_nonexistent_factory_id_returns_empty_plants_and_chiefs(self, client, auth_headers):
@@ -159,23 +154,22 @@ class TestMetaFilters:
         assert len(body["factories"]) >= 1
         assert len(body["shifts"]) == 2
 
-    def test_nonexistent_plant_id_returns_empty_chiefs_but_full_plants(self, client, auth_headers, db_session):
+    def test_nonexistent_plant_id_returns_empty_chiefs_and_plants(self, client, auth_headers):
         nonexistent = str(uuid.uuid4())
-        all_active_plant_ids = [
-            str(p.id) for p in db_session.scalars(select(Plant).where(Plant.is_active.is_(True)).order_by(Plant.sequence_number))
-        ]
-
         resp = client.get("/api/v1/meta/filters", headers=auth_headers, params={"plant_ids": nonexistent})
         assert resp.status_code == 200
         body = unwrap(resp)
-        assert [p["id"] for p in body["plants"]] == all_active_plant_ids
+        assert body["plants"] == []
         assert body["chiefs"] == []
 
+    # `get_auth_context` her istekte rolü/scope'u çözmek için 2 sabit ek sorgu yapar
+    # (user_role_assignments get + user_scope_assignments select) — aşağıdaki beklenen
+    # sayılar bu sabit ek yükü içerir.
     def test_query_count_no_filter(self, client, auth_headers):
         with count_queries() as counter:
             resp = client.get("/api/v1/meta/filters", headers=auth_headers)
         assert resp.status_code == 200
-        assert counter["n"] == 6
+        assert counter["n"] == 8
 
     def test_query_count_with_filters(self, client, auth_headers, db_session):
         factories = list(db_session.scalars(select(Factory).where(Factory.is_active.is_(True)).order_by(Factory.code)))
@@ -185,7 +179,7 @@ class TestMetaFilters:
         with count_queries() as counter:
             resp = client.get("/api/v1/meta/filters", headers=auth_headers, params={"factory_ids": str(factory.id)})
         assert resp.status_code == 200
-        assert counter["n"] == 6
+        assert counter["n"] == 8
 
         with count_queries() as counter:
             resp = client.get(
@@ -193,7 +187,7 @@ class TestMetaFilters:
                 params={"factory_ids": str(factory.id), "plant_ids": str(plant.id)},
             )
         assert resp.status_code == 200
-        assert counter["n"] == 6
+        assert counter["n"] == 8
 
     def test_comma_only_factory_ids_matches_nothing_not_everything(self, client, auth_headers):
         for raw in (",", ",,", " "):
@@ -203,16 +197,13 @@ class TestMetaFilters:
             assert body["plants"] == [], f"raw={raw!r}"
             assert body["chiefs"] == [], f"raw={raw!r}"
 
-    def test_comma_only_plant_ids_matches_nothing_not_everything(self, client, auth_headers, db_session):
-        all_active_plant_ids = [
-            str(p.id) for p in db_session.scalars(select(Plant).where(Plant.is_active.is_(True)).order_by(Plant.sequence_number))
-        ]
+    def test_comma_only_plant_ids_matches_nothing(self, client, auth_headers):
         for raw in (",", ",,", " "):
             resp = client.get("/api/v1/meta/filters", headers=auth_headers, params={"plant_ids": raw})
             assert resp.status_code == 200
             body = unwrap(resp)
             assert body["chiefs"] == [], f"raw={raw!r}"
-            assert [p["id"] for p in body["plants"]] == all_active_plant_ids, f"raw={raw!r}"
+            assert body["plants"] == [], f"raw={raw!r}"
 
     def test_comma_only_plant_ids_wins_precedence_over_valid_factory_ids(self, client, auth_headers, db_session):
         factory = db_session.scalars(select(Factory).where(Factory.is_active.is_(True))).first()

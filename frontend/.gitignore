@@ -11,6 +11,10 @@ node_modules
 dist
 dist-ssr
 *.local
+coverage
+test-results
+playwright-report
+scripts/.smoke-output
 
 # Editor directories and files
 .vscode/*

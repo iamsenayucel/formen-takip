@@ -26,9 +26,11 @@ class ReportRepository:
         self.db.refresh(export)
 
     def list_page(
-        self, *, cursor_value, cursor_id: UUID | None, limit: int,
+        self, *, cursor_value, cursor_id: UUID | None, limit: int, requested_by_subject: str | None = None,
     ) -> list[ReportExport]:
         query = select(ReportExport)
+        if requested_by_subject is not None:
+            query = query.where(ReportExport.requested_by_subject == requested_by_subject)
         if cursor_id is not None:
             query = query.where(keyset_after(ReportExport.created_at, "desc", cursor_value, ReportExport.id, cursor_id))
         query = query.order_by(ReportExport.created_at.desc(), ReportExport.id).limit(limit + 1)

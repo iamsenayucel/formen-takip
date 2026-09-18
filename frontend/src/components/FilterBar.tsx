@@ -29,12 +29,17 @@ export function MultiSelect({
   selected,
   onChange,
   disabled,
+  "aria-labelledby": ariaLabelledBy,
 }: {
   label: string;
   options: MultiSelectOption[];
   selected: string[];
   onChange: (ids: string[]) => void;
   disabled?: boolean;
+  /** Set this when an external <label> already names this field (e.g. a
+   * form field wrapper) — it takes over the button's accessible name
+   * instead of the always-visible `label` prop text. */
+  "aria-labelledby"?: string;
 }) {
   const [open, setOpen] = useState(false);
   const [query, setQuery] = useState("");
@@ -68,6 +73,7 @@ export function MultiSelect({
         onClick={() => (open ? close() : setOpen(true))}
         aria-haspopup="listbox"
         aria-expanded={open}
+        aria-labelledby={ariaLabelledBy}
         className={`flex min-w-32 items-center justify-between gap-2 ${inputClass} disabled:opacity-40`}
         style={inputStyle}
       >

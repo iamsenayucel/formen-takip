@@ -45,26 +45,26 @@ def _apply_filters(stmt: Select, filters: Filters) -> Select:
         PerformanceRecord.performance_date >= filters.date_from,
         PerformanceRecord.performance_date <= filters.date_to,
     )
-    if filters.plant_ids:
+    if filters.plant_ids is not None:
         stmt = stmt.where(PerformanceRecord.plant_id.in_(filters.plant_ids))
-    if filters.factory_ids:
+    if filters.factory_ids is not None:
         stmt = stmt.where(
             PerformanceRecord.plant_id.in_(select(Plant.id).where(Plant.factory_id.in_(filters.factory_ids)))
         )
-    if filters.chief_ids:
+    if filters.chief_ids is not None:
         stmt = stmt.where(PerformanceRecord.chief_id.in_(filters.chief_ids))
-    if filters.shift_ids:
+    if filters.shift_ids is not None:
         stmt = stmt.where(PerformanceRecord.shift_id.in_(filters.shift_ids))
-    if filters.kpi_ids:
+    if filters.kpi_ids is not None:
         stmt = stmt.where(PerformanceRecord.kpi_id.in_(filters.kpi_ids))
-    if filters.foreman_ids:
+    if filters.foreman_ids is not None:
         stmt = stmt.where(PerformanceRecord.foreman_id.in_(filters.foreman_ids))
     return stmt
 
 
 def active_kpi_weight_sum(db: Session, filters: Filters | None = None) -> float:
     stmt = select(func.sum(Kpi.weight)).where(Kpi.is_active.is_(True))
-    if filters is not None and filters.kpi_ids:
+    if filters is not None and filters.kpi_ids is not None:
         stmt = stmt.where(Kpi.id.in_(filters.kpi_ids))
     total = db.scalar(stmt)
     return float(total or 0)

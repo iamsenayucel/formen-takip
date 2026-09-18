@@ -1,3 +1,11 @@
+export interface AuthMeResponse {
+  subject: string;
+  displayName: string | null;
+  email: string | null;
+  role: string | null;
+  permissions: string[];
+}
+
 export interface PerformanceLevel {
   name: string;
   description: string;

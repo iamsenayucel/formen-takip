@@ -76,13 +76,13 @@ def _fetch_raw_rows(
         PerformanceRecord.numerator_value.isnot(None),
         PerformanceRecord.denominator_value.isnot(None),
     )
-    if plant_ids:
+    if plant_ids is not None:
         stmt = stmt.where(PerformanceRecord.plant_id.in_(plant_ids))
-    if factory_ids:
+    if factory_ids is not None:
         stmt = stmt.where(PerformanceRecord.plant_id.in_(select(Plant.id).where(Plant.factory_id.in_(factory_ids))))
-    if kpi_ids:
+    if kpi_ids is not None:
         stmt = stmt.where(PerformanceRecord.kpi_id.in_(kpi_ids))
-    if shift_ids:
+    if shift_ids is not None:
         stmt = stmt.where(PerformanceRecord.shift_id.in_(shift_ids))
 
     return [
@@ -235,9 +235,9 @@ def build_heatmap(
         v1_id, v2_id = ordered_shifts[0].id, ordered_shifts[1].id
 
     plant_query = select(Plant).where(Plant.is_active.is_(True))
-    if plant_ids:
+    if plant_ids is not None:
         plant_query = plant_query.where(Plant.id.in_(plant_ids))
-    if factory_ids:
+    if factory_ids is not None:
         plant_query = plant_query.where(Plant.factory_id.in_(factory_ids))
     plants = sorted(db.scalars(plant_query), key=lambda p: p.sequence_number)
     factories_by_id = {f.id: f for f in db.scalars(select(Factory))}
@@ -654,12 +654,9 @@ def _fetch_assigned_week_indices(
 ) -> dict[UUID, dict[int, UUID]]:
     """Bir formenin o hafta bu tesiste fiilen hangi vardiyada görevli olduğunu belirler.
 
-    KPI veya veri kalitesi durumundan bağımsız olarak — herhangi bir KPI için herhangi bir
-    kalite durumunda kayıt varlığı, ingestion pipeline'ının o formeni o gün bu tesiste fiilen
-    çalışıyor kabul ettiği anlamına gelir. Vardiya filtrelenmez: formenin haftalık rotasyonu
-    hangi vardiyaya denk gelirse gelsin, o haftaki fiili görev/vardiya buradan okunur. Bu,
-    "görevli değil" ile "görevli ama bu KPI için yeterli veri yok" durumlarını ayırt etmek
-    için kullanılır.
+    KPI/veri kalitesinden bağımsız olarak herhangi bir kayıt varlığı "o gün fiilen çalışıyor"
+    sayılır; bu, "görevli değil" ile "görevli ama bu KPI için yeterli veri yok" durumlarını
+    ayırt etmek için kullanılır.
     """
     stmt = select(PerformanceRecord.foreman_id, PerformanceRecord.performance_date, PerformanceRecord.shift_id).where(
         PerformanceRecord.plant_id == plant_id,

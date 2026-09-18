@@ -1,5 +1,6 @@
 import { useMemo, useState } from "react";
 import { LayoutGrid, Plus, Table2 } from "lucide-react";
+import { Can } from "../components/Can";
 import { Card, EmptyState, ErrorState, LoadingState } from "../components/StateViews";
 import { PageHeader } from "../components/PageHeader";
 import { LoadMoreButton } from "../components/LoadMoreButton";
@@ -76,14 +77,16 @@ export function ImprovementWorksPage() {
       <PageHeader
         title="Operational Impact+"
         actions={
-          <button
-            onClick={() => setFormOpen(true)}
-            className="flex shrink-0 items-center gap-1.5 rounded-md px-3.5 py-2 text-[13px] font-medium text-white"
-            style={{ background: "var(--primary)" }}
-          >
-            <Plus size={14} strokeWidth={2} />
-            Yeni Çalışma Ekle
-          </button>
+          <Can permission="operational_impact.contribute">
+            <button
+              onClick={() => setFormOpen(true)}
+              className="flex shrink-0 items-center gap-1.5 rounded-md px-3.5 py-2 text-[13px] font-medium text-white"
+              style={{ background: "var(--primary)" }}
+            >
+              <Plus size={14} strokeWidth={2} />
+              Yeni Çalışma Ekle
+            </button>
+          </Can>
         }
       />
 

@@ -5,10 +5,15 @@ from app.core.config import get_settings
 
 
 @pytest.fixture
-def bypass_on(monkeypatch):
+def bypass_on(monkeypatch, role_assignment_factory):
     settings = get_settings()
     monkeypatch.setattr(settings, "auth_bypass", True)
     monkeypatch.setattr(settings, "environment", "development")
+    # RBAC: bypass subject'i (dev-demo-user) gerçek dev/demo ortamında `cmd_seed`'in
+    # otomatik atadığı rolü burada da taklit eder — aksi halde her korumalı uç 403 döner.
+    from app.models.enums import Role, ScopeType
+
+    role_assignment_factory(subject="dev-demo-user", role=Role.OPERATIONS_MANAGER, scope_type=ScopeType.ALL)
     yield settings
 
 

@@ -41,17 +41,6 @@ export function businessTodayIso(): string {
   return todayIso();
 }
 
-const DEFAULTS: FilterState = {
-  dateFrom: daysAgoIso(30),
-  dateTo: todayIso(),
-  plantIds: [],
-  factoryIds: [],
-  chiefIds: [],
-  shiftIds: [],
-  kpiIds: [],
-  foremanIds: [],
-};
-
 function parseList(value: string | null): string[] {
   return value ? value.split(",").filter(Boolean) : [];
 }
@@ -61,8 +50,11 @@ export function useFilters() {
 
   const filters = useMemo<FilterState>(
     () => ({
-      dateFrom: searchParams.get("date_from") || DEFAULTS.dateFrom,
-      dateTo: searchParams.get("date_to") || DEFAULTS.dateTo,
+      // daysAgoIso(30)/todayIso() are called fresh here (not a module-level
+      // constant) so a URL with no date params always resolves to "today"
+      // at render time, not whatever moment this module first loaded.
+      dateFrom: searchParams.get("date_from") || daysAgoIso(30),
+      dateTo: searchParams.get("date_to") || todayIso(),
       plantIds: parseList(searchParams.get("plant_ids")),
       factoryIds: parseList(searchParams.get("factory_ids")),
       chiefIds: parseList(searchParams.get("chief_ids")),

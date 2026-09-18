@@ -17,20 +17,33 @@
   production debug/CORS/bypass fail-closed baseline.
 - **DONE:** Backend/frontend/scheduler Docker imajları, runtime frontend config,
   Caddy HTTPS/security headers ve health/readiness.
+- **DONE:** Fine-grained backend RBAC ve endpoint permission enforcement —
+  üç rol (`FOREMAN`/`SUPERVISOR`/`OPERATIONS_MANAGER`), sabit permission
+  paketleri, ALL/FACTORY/PLANT veri kapsamı, fail-closed (atama yoksa 403),
+  frontend `<Can>`/`ProtectedRoute` UI gate'i + backend-contract testi.
+- **DONE:** Frontend Vitest birim/bileşen suite'i (25 dosya/259 test) ve
+  repository içi CI (`.github/workflows/`: backend lint+full pytest, frontend
+  lint+typecheck+test+build, gitleaks, pip-audit, CodeQL).
+- **DONE:** Yapılandırılmış JSON log + request-id korelasyonu + gerçek
+  client IP (trusted proxy middleware) ve configurable DB connection pool.
 
 **Deployment'a bağlı tamamlanacak işler**
 
-- **PLANNED / DEFERRED:** Fine-grained backend RBAC ve endpoint permission
-  enforcement. Değerlendirilecek roller: `reader`, `report-operator`,
-  `contribution-editor`, `anomaly-analyst`, `admin`.
 - **PLANNED:** Sentetik provider yerine gerçek SAP ve Ocean/ML entegrasyonları.
 - **PLANNED:** Kurumsal Keycloak client/realm, production PostgreSQL,
   S3/CloudFront, SMTP, DNS/TLS ve secret management provizyonu/UAT'ı.
-- **PLANNED:** Merkezi logging/metrics/tracing/alerting ve operasyon runbook'u.
-- **PLANNED:** Frontend component/E2E otomasyonu ve repository içi CI/CD gate'i.
+- **PLANNED:** Merkezi metrics/tracing/alerting (OpenTelemetry/Prometheus) ve
+  operasyon runbook'u — mevcut olan yalnızca stdout JSON log'dur, merkezi bir
+  gözlemlenebilirlik platformuna gönderim yoktur.
+- **PLANNED:** Gerçek otomatik deploy (`deploy.yml` bilerek iskelet) ve
+  GitHub branch protection'da required status check yapılandırması.
+- **PLANNED:** Playwright kritik-yol smoke suite'inin CI'a bağlanması (bugün
+  bilerek yerel/manuel çalıştırılıyor — bkz. [07-testing.md](07-testing.md)).
+- **PLANNED:** pip-audit'in blocking hale getirilmesi (bugün 5 pakette 40
+  bilinen CVE nedeniyle `continue-on-error`, non-blocking).
 - **PLANNED:** Birden fazla scheduler instance gerekiyorsa dağıtık lock/claim
   mekanizması.
 
-Roadmap, tamamlanmış OEE/Tier1/security/Docker çalışmalarını gelecek iş gibi
-göstermez. Deployment'a bağlı entegrasyonlar kodda adapter/config düzeyinde
-bulunsa bile gerçek kurumsal servis doğrulaması tamamlanmış sayılmaz.
+Roadmap, tamamlanmış OEE/Tier1/security/Docker/RBAC/CI çalışmalarını gelecek iş
+gibi göstermez. Deployment'a bağlı entegrasyonlar kodda adapter/config
+düzeyinde bulunsa bile gerçek kurumsal servis doğrulaması tamamlanmış sayılmaz.

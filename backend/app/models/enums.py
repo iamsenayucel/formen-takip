@@ -232,3 +232,15 @@ class AnomalyAnalysisStatus(str, enum.Enum):
 class AnalysisMode(str, enum.Enum):
     SINGLE_CONTEXT = "single_context"
     TOOL_CALLING = "tool_calling"
+
+
+class Role(str, enum.Enum):
+    FOREMAN = "FOREMAN"
+    SUPERVISOR = "SUPERVISOR"
+    OPERATIONS_MANAGER = "OPERATIONS_MANAGER"
+
+
+class ScopeType(str, enum.Enum):
+    ALL = "ALL"
+    FACTORY = "FACTORY"
+    PLANT = "PLANT"

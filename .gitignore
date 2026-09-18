@@ -32,6 +32,10 @@ dist-ssr/
 playwright-report/
 test-results/
 
+# Playwright smoke script'lerinin varsayılan ekran görüntüsü çıktısı (bkz.
+# frontend/scripts/smoke_helpers.mjs::resolveShotDir) — SMOKE_SHOT_DIR ile değiştirilebilir.
+frontend/scripts/.smoke-output/
+
 # --- Loglar ---
 *.log
 logs/
@@ -42,6 +46,12 @@ pnpm-debug.log*
 
 # --- Yerel veritabanı yedekleri ---
 *.dump
+
+# --- CI test çıktısı (backend-ci.yml --junitxml) — yerelde de aynı komutla üretilir ---
+pytest-results.xml
+
+# --- Geçici/lokal scratch dizinleri (uygulamanın parçası değil) ---
+.tmp-corvus-word/
 
 # --- Editör / IDE ---
 .vscode/*

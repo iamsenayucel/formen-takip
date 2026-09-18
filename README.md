@@ -1,9 +1,12 @@
 # Formen Performans Takip Sistemi
 
 Karaman'daki üretim tesislerinde formen (vardiya amiri) performansını KPI bazlı
-izleyen, **üst yönetime yönelik salt-okunur karar destek** uygulaması. Foremen
-ve tesis şefleri sistemin kullanıcısı değildir; veri girişi yalnızca ingestion
-pipeline'ı (bugün sentetik veri üreticisi, ileride SAP) üzerinden gerçekleşir.
+izleyen, **salt-okunur karar destek** uygulaması. Veri girişi yalnızca ingestion
+pipeline'ı (bugün sentetik veri üreticisi, ileride SAP) üzerinden gerçekleşir —
+hiçbir kullanıcı rolü performans verisini elle oluşturamaz/değiştiremez/silemez.
+Uygulamanın kendisine erişim ise rol bazlıdır (bkz. [Yetkilendirme (RBAC)](#yetkilendirme-rbac)):
+Operasyon Yöneticisi ve Şef tam/geniş erişime sahipken, Formen rolü kendi
+performans/genel bakış verisiyle sınırlı, salt-okunur bir erişime sahiptir.
 
 ## İçindekiler
 
@@ -15,11 +18,14 @@ pipeline'ı (bugün sentetik veri üreticisi, ileride SAP) üzerinden gerçekle�
 - [Authentication Architecture](#authentication-architecture)
   - [Yerel Geliştirme: Local Keycloak](#yerel-geliştirme-local-keycloak)
   - [Development Demo Mode](#development-demo-mode)
+- [Yetkilendirme (RBAC)](#yetkilendirme-rbac)
 - [Backend API](#backend-api)
+- [Logging](#logging)
 - [Tespitler Modülü (Anomali Tespiti + Yapay Zekâ Analizi)](#tespitler-modülü-anomali-tespiti--yapay-zekâ-analizi)
   - [Aşama 2 — Tool Calling Destekli Analiz Ajanı](#aşama-2--tool-calling-destekli-analiz-ajanı)
 - [Katkılar](#katkılar)
 - [Formen Aylık Rapor Storage Mimarisi](#formen-aylık-rapor-storage-mimarisi)
+- [DB Connection Pool](#db-connection-pool)
 - [Job Claiming & Concurrency](#job-claiming--concurrency)
 - [Frontend](#frontend)
 - [Veritabanı Şeması](#veritabanı-şeması)
@@ -39,6 +45,8 @@ pipeline'ı (bugün sentetik veri üreticisi, ileride SAP) üzerinden gerçekle�
   - [Troubleshooting](#troubleshooting)
 - [Yerel Geliştirme (Docker'sız)](#yerel-geliştirme-dockersız)
 - [Testler](#testler)
+  - [Playwright Smoke Testleri](#playwright-smoke-testleri)
+- [CI/CD](#cicd)
 - [Depoyu Klonladıktan Sonra](#depoyu-klonladıktan-sonra)
 - [Ortam Değişkenleri](#ortam-değişkenleri)
 - [Bilinen Sınırlamalar / Kapsam Dışı](#bilinen-sınırlamalar--kapsam-dışı)
@@ -157,10 +165,11 @@ göndereceği ham veriyi taklit eden salt okunur bir "ham veri" katmanı bulunur
   `is_working=true` bir satır varsa formene bağlanabilir.
 - `production_records` — ham üretim/kayıp kaydı: planlanan/gerçekleşen
   miktar, ölçülen ortalama gramaj, GSF/Iskarta miktarı, Teknik/İmalat/Diğer
-  duruş dakikaları, plan revizyon no'su. `performance_records`'la aynı
-  idempotency deseni uygulanır (`uq_production_record_source`,
-  `uq_production_record_natural_key`). Hiçbir KPI yüzdesi burada
-  tutulmaz — yalnızca ham ölçüm.
+  duruş dakikaları, fiilen çalışılan süre (`working_time_minutes`, OEE'nin
+  ham girdisi — vardiya başına 0-720 dk aralığında), plan revizyon no'su.
+  `performance_records`'la aynı idempotency deseni uygulanır
+  (`uq_production_record_source`, `uq_production_record_natural_key`).
+  Hiçbir KPI yüzdesi burada tutulmaz — yalnızca ham ölçüm.
 
 `app/services/production_kpi_derivation.py::derive_raw_performance_records()`
 bu tabloları okuyup her üretim kaydından sıfır veya daha fazla
@@ -173,6 +182,7 @@ bu tabloları okuyup her üretim kaydından sıfır veya daha fazla
 | `ISKARTA` | `iskarta_qty / actual_qty` |
 | `PLANA_UYUM` | `actual_qty / planned_qty` |
 | `INKITA` | `(technical_downtime_minutes + manufacturing_downtime_minutes) / planlanan vardiya süresi` — `other_downtime_minutes` puanlamaya hiç dahil edilmez |
+| `OEE` | `working_time_minutes / SHIFT_MINUTES` (`SHIFT_MINUTES=720` dk, sabit vardiya süresi) |
 
 `target_value` bu katmandan bilinçli olarak `None` gelir; `ingestion.py`
 her zaman olduğu gibi hedefi `target_resolver.resolve_target()` ile
@@ -195,35 +205,94 @@ kaynak üretim kaydına geri izlenebilir kılar.
   `range_target`, `direct_score`, `proportional_penalty`. Bu türlerin
   dışındaki (tanınmayan) bir `calculation_type` için hâlâ hata fırlatır —
   keyfi kod veya string formül çalıştırma yoktur.
-- **Bugün seed edilen 5 KPI'nın tamamı** `calculation_type=CUSTOM_FORMULA`'dır
-  ve sabit bir `formula_type` dispatch tablosuna (`_CUSTOM_FORMULA_DISPATCH`)
-  yönlendirilerek KPI'a özel, elle yazılmış formüllerle puanlanır — yalnızca
-  burada tanımlı 4 formül türünden birine yönlenebilir, keyfi kod
-  çalıştırılamaz.
+- **Bugün seed edilen 6 KPI'nın tamamı** `calculation_type=CUSTOM_FORMULA`'dır
+  ve KPI'a özel, elle yazılmış formüllerle puanlanır
+  (`kpi_engine.py::compute_score_for_rule`): dördü sabit bir `formula_type`
+  dispatch tablosundan (`_CUSTOM_FORMULA_DISPATCH` — `SIGNED_ABSOLUTE_PIECEWISE`,
+  `TARGET_RATIO_PIECEWISE`, `HYBRID_BASE_PIECEWISE_LOG`,
+  `TARGET_RATIO_LINEAR_BONUS`) yönlendirilir; `PLANA_UYUM`
+  (`ASYMMETRIC_PLAN_ACHIEVEMENT`) fiili/planlanan miktar gerektiren ayrı bir
+  dalda özel olarak işlenir. Toplamda burada tanımlı 5 farklı `formula_type`
+  değerinden birine yönlenebilir, keyfi kod veya string formül çalıştırma
+  yoktur.
 
-Varsayılan 5 KPI (`DEFAULT_KPI_SEED`, ağırlıkları toplamda 100):
+Varsayılan 6 KPI (`DEFAULT_KPI_SEED`, ağırlıkları toplamda 100):
 
 | Kod | Ad | Ağırlık | `formula_type` | Mantık |
 |---|---|---|---|---|
-| `AGIR_GITME` | Ağır Gitme Oranı | 20 | `SIGNED_ABSOLUTE_PIECEWISE` | Kabul aralığı dışına taşan işaretli sapmanın mutlak büyüklüğü; hedefi tutturursa 100, sapma arttıkça `good_coefficient`/`bad_coefficient` (log2) ile ceza |
-| `GSF` | GSF Oranı | 25 | `HYBRID_BASE_PIECEWISE_LOG` | Geri kazanılamayan nihai kayıp oranı; Iskarta'dan daha sert (log tabanlı) cezalandırılır |
-| `ISKARTA` | Iskarta Oranı | 15 | `TARGET_RATIO_PIECEWISE` | Geri dönüştürülebilir kayıp oranı; GSF'ye göre daha yumuşak cezalandırılır |
-| `INKITA` | İnkita Oranı | 20 | `HYBRID_BASE_PIECEWISE_LOG` | Yalnızca Teknik + İmalat duruş süresi / planlanan süre — Diğer duruşlar hariç |
-| `PLANA_UYUM` | Plana Uyum Oranı | 20 | `ASYMMETRIC_PLAN_ACHIEVEMENT` | `(gerçekleşen − planlanan) / planlanan`; **yönlü (signed)** sapma — plan üstü üretim ödüllendirilir, plan altı kalma daha güçlü cezalandırılır (aşağıda ayrıntı) |
+| `AGIR_GITME` | Ağır Gitme Oranı | 13 | `SIGNED_ABSOLUTE_PIECEWISE` | Kabul aralığı dışına taşan işaretli sapmanın mutlak büyüklüğü; hedefi tutturursa 100, sapma arttıkça `good_coefficient`/`bad_coefficient` (log2) ile ceza |
+| `GSF` | GSF Oranı | 20 | `HYBRID_BASE_PIECEWISE_LOG` | Geri kazanılamayan nihai kayıp oranı; Iskarta'dan daha sert (log tabanlı) cezalandırılır |
+| `ISKARTA` | Iskarta Oranı | 12 | `TARGET_RATIO_PIECEWISE` | Geri dönüştürülebilir kayıp oranı; GSF'ye göre daha yumuşak cezalandırılır |
+| `INKITA` | İnkita Oranı | 22 | `HYBRID_BASE_PIECEWISE_LOG` | Yalnızca Teknik + İmalat duruş süresi / planlanan süre — Diğer duruşlar hariç |
+| `PLANA_UYUM` | Plana Uyum Oranı | 12 | `ASYMMETRIC_PLAN_ACHIEVEMENT` | `(gerçekleşen − planlanan) / planlanan`; **yönlü (signed)** sapma — plan üstü üretim ödüllendirilir, plan altı kalma daha güçlü cezalandırılır (aşağıda ayrıntı) |
+| `OEE` | OEE | 21 | `TARGET_RATIO_LINEAR_BONUS` | `working_time_minutes / SHIFT_MINUTES(720)` — fiilen çalışılan sürenin vardiyanın (veya tesis/dönem toplamının) toplam süresine oranı; bkz. aşağıdaki "OEE adlandırma uyarısı" |
 
-Ortak mantık: hedef tam tutturulduğunda **100**, daha iyi performansta
-doğrusal olarak **100'ün üzerine** çıkar, daha kötüde logaritmik olarak
-**100'ün altına** düşer — `min_score=0` dışında **manuel bir üst sınır
-(tavan) uygulanmaz** (`kpis.max_score` sütunundaki `999999.99`, yalnızca
-NOT NULL kısıtı içindir; CUSTOM_FORMULA bu değeri hiç okumaz). Bu model
-`9f3a2c7b1e44` (skor kolonlarının hassasiyetini genişletme) ve `b6d4f8a2c1e7`
-(KPI'a özel formüller) migration'larıyla geldi; eski 5 KPI'lık jenerik model
-(`URETIM_GERCEKLESME`, `FIRE_ORANI`, `PLANSIZ_DURUS`, `KALITE_UYGUNLUK`,
-`IS_GUVENLIGI`) tamamen kaldırıldı. Var olan performans verisini yeni
-formüllerle yeniden hesaplamak için:
-`docker compose exec backend python -m app.cli apply-scoring-model-v2`.
+İş kararı bakış açısıyla 6 KPI (birim, ham kaynak alanlar, zaman ölçeği):
 
-`PLANA_UYUM` diğer dört KPI'dan farklı olarak **iki taraflı asimetrik**
+| KPI | Birim | Hesaplamada kullanılan temel (ham) alanlar | Zaman ölçeği | Hangi karara girdi sağlar |
+|---|---|---|---|---|
+| Ağır Gitme Oranı (`AGIR_GITME`) | % | `measured_avg_gram`, ürünün `lower_gram_limit`/`upper_gram_limit`/`standard_gram`, `actual_qty` | Üretim kaydı (formen/tesis/gün) bazında; dönem skoru pay/payda toplamından tek oran | Ürünün kabul gramaj aralığı dışına (hem eksik hem fazla) çıkan sapmayı izler — ürün/hammadde maliyeti ve kalite kararlarına girdi |
+| GSF Oranı (`GSF`) | % | `gsf_qty`, `actual_qty` | Üretim kaydı bazında; dönem skoru pay/payda toplamından tek oran | Geri kazanılamayan, tamamen kaybedilen nihai fire oranını izler |
+| Iskarta Oranı (`ISKARTA`) | % | `iskarta_qty`, `actual_qty` | Üretim kaydı bazında; dönem skoru pay/payda toplamından tek oran | Yeniden üretimde kullanılabilen (geri dönüştürülebilir) kayıp oranını izler |
+| İnkita Oranı (`INKITA`) | % | `technical_downtime_minutes` + `manufacturing_downtime_minutes` / planlanan vardiya süresi (`other_downtime_minutes` hariç) | Üretim kaydı bazında; dönem skoru pay/payda toplamından tek oran | Teknik/imalat kaynaklı duruşların üretim süresine oranını izler |
+| Plana Uyum Oranı (`PLANA_UYUM`) | % | `actual_qty`, `planned_qty` | Üretim kaydı bazında; dönem skoru pay/payda toplamından tek oran | Gerçekleşen üretimin (revize) plana yönlü (fazla/az) sapmasını izler |
+| OEE (`OEE`) | % | `working_time_minutes`, sabit vardiya süresi `SHIFT_MINUTES=720` | Vardiya bazında (720 dk); tesis/formen/dönem toplamı için pay/payda toplamından tek oran | Tesis/vardiya çalışma süresi kullanım oranını (yalnızca "Availability" benzeri bileşen) izler — bkz. aşağıdaki "OEE adlandırma uyarısı" |
+
+Diğer beş KPI için ortak mantık: hedef tam tutturulduğunda **100**, daha iyi
+performansta doğrusal olarak **100'ün üzerine** çıkar, daha kötüde
+logaritmik olarak **100'ün altına** düşer — `min_score=0` dışında **manuel
+bir üst sınır (tavan) uygulanmaz** (`kpis.max_score` sütunundaki
+`999999.99`, yalnızca NOT NULL kısıtı içindir; bu beş KPI'nın
+CUSTOM_FORMULA'sı bu değeri hiç okumaz). `OEE` bu kalıbın **dışındadır**:
+sabit bir tavanı vardır (`kpis.max_score=105`) ve formülü
+(`score_target_ratio_linear_bonus`) hedefi tutturduğunda doğrudan **105**
+verir (`raw = actual/target × 100 × ratio_multiplier`, `ratio_multiplier=1.05`,
+bkz. `tests/integration/test_oee.py::TestOeeShiftLevelScoring`) — çünkü
+`actual_value`'nun kendisi tanım gereği %100'ü aşamaz
+(`kpis.max_valid_value=100`, bir vardiyada çalışma süresi 720 dakikayı
+geçemez). Dolayısıyla OEE için "100'ün üzerine çıkma" kademeli bir bonus
+bölgesi değil, yalnızca tam hedefte gerçekleşen tek bir sıçramadır; hedefin
+altında kalındığında ise diğer KPI'lar gibi doğrusal olarak (log değil)
+100'ün altına düşer (`raw = actual/target × 100 × 1.05`, `actual<target`
+için orantılı azalır).
+
+Bu model `9f3a2c7b1e44` (skor kolonlarının hassasiyetini genişletme) ve
+`b6d4f8a2c1e7` (KPI'a özel formüller) migration'larıyla geldi; eski 5
+KPI'lık jenerik model (`URETIM_GERCEKLESME`, `FIRE_ORANI`, `PLANSIZ_DURUS`,
+`KALITE_UYGUNLUK`, `IS_GUVENLIGI`) tamamen kaldırıldı — bu, bugünkü 6 KPI'lık
+CUSTOM_FORMULA modelinden farklı, daha önce tamamen sökülmüş ayrı bir
+modeldir. `OEE`, KPI motoru 5 KPI'lık haldeyken sonradan eklendi:
+`f1a3c5e7b9d2` KPI'yı tesis-gün ölçeğinde (0-1440 dk, hedef 1440) tanıttı,
+`c4a99f861289` vardiya ölçeğine (0-720 dk, `%`, hedef 100) geçirdi ve bu
+geçişte eski ölçekle hesaplanmış `OEE` performans kayıtlarını geri alınamaz
+şekilde sildi (`downgrade()` `NotImplementedError` fırlatır), `3b43eeec9028`
+ise 6 KPI'nın ağırlıklarını yukarıdaki tabloyla eşleşecek şekilde yeniden
+dengeledi. Var olan performans verisini yeni formüllerle yeniden hesaplamak
+için: `docker compose exec backend python -m app.cli apply-scoring-model-v2`
+(bu komut OEE'nin şema/ağırlık geçmişini değil, KPI'a özel puanlama
+formüllerini yeniden uygular).
+
+**"OEE" adlandırma uyarısı:** Bu sistemdeki `OEE` KPI'sı, endüstri
+standardı klasik OEE formülünü (Availability × Performance × Quality)
+**uygulamaz**. Kod (`app/services/production_kpi_derivation.py::_kpi_components`)
+yalnızca `working_time_minutes / SHIFT_MINUTES` oranını hesaplar — bu,
+klasik OEE'nin yalnızca **Availability** (kullanılabilirlik) bileşenine
+karşılık gelir; ayrı bir Performance (hız/hat kaybı) veya Quality (iyi/
+kusurlu ürün ayrımı) bileşeni `OEE` formülüne çarpımsal olarak dahil
+edilmez. Performance'a ve Quality'ye yakın kavramlar sistemde `PLANA_UYUM`
+(üretim hızı/miktarı planla uyum) ve `GSF`/`ISKARTA` (kusurlu/geri
+kazanılamayan ürün oranı) olarak **bağımsız KPI'lar** halinde zaten var,
+ama bunlar OEE'nin içine çarpılmaz — toplam skora OEE ile birlikte ayrı
+ayrı, kendi ağırlıklarıyla (aşağıdaki ağırlıklı geometrik ortalama üzerinden)
+girerler. `OEE` planlı/plansız duruş ayrımı yapmaz (bu ayrım `INKITA`'nın
+`included_components`/`excluded_components` parametrelerinde yapılır) ve
+`working_time_minutes` `NULL` olduğunda o üretim kaydı için `OEE` bileşeni
+hiç üretilmez (payda sabit `SHIFT_MINUTES=720` olduğundan sıfıra bölme
+riski yoktur). `OEE` ile `INKITA` arasında negatif korelasyon beklenir ve
+`tests/integration/test_oee.py::TestOeeInkitaCorrelation` ile doğrulanır,
+ama biri diğerinin matematiksel bileşeni değildir — iki ayrı KPI'dır.
+
+`PLANA_UYUM` diğer beş KPI'dan farklı olarak **iki taraflı asimetrik**
 puanlanır (`kpi_engine.py::score_plan_achievement`, seed parametreleri
 `reference_data.py::DEFAULT_KPI_SEED`): plan üstü sapma `positive_log_coefficient=5.0`
 ile, plan altı sapma `negative_log_coefficient=10.0` ile — yani hedefin
@@ -452,6 +521,166 @@ durdurur (bkz. `app/core/config.py::_forbid_auth_bypass_outside_development`);
 `development` dışında herhangi bir `ENVIRONMENT` değeri de aynı şekilde
 reddedilir.
 
+## Yetkilendirme (RBAC)
+
+Kimlik doğrulama (authentication — "bu kim?") ile yetkilendirme (authorization —
+"bu ne yapabilir?") ayrı katmanlardır. `get_current_identity` yalnızca kimlik
+doğrular; yetkilendirme `app/api/authz_deps.py::get_auth_context` ve
+`require_permission(...)` ile ayrı bir katmanda uygulanır.
+
+### Role, Permission, Scope nedir?
+
+```
+User (OIDC subject)
+  ↓
+Role            — kullanıcının organizasyonel rolü (permission'ların sabit bir paketi)
+  ↓
+Permission      — hangi işlemi yapabildiği (atomik, ör. "reports.download")
+  ↓
+Scope           — hangi organizasyonel veri üzerinde yapabildiği (ALL / FACTORY / PLANT)
+```
+
+Rol ve scope, JWT claim'i olarak değil, **subject-keyed yeni local DB tablolarında**
+tutulur: `user_role_assignments` (subject → rol) ve `user_scope_assignments`
+(subject → bir veya daha fazla scope satırı). Bu tablolar isim/e-posta gibi PII
+içermez — yalnızca OIDC `subject` string'i, mevcut `audit_logs.subject` /
+`contribution_works.created_by_subject` deseniyle tutarlı. Bu tasarım, rol/scope'un
+her request'te DB'den güncel okunmasını sağlar; bir rol geri alındığında eski bir
+JWT'nin hâlâ eski yetkiyi taşıması riski (token süresi dolana kadar) ortadan kalkar.
+
+**Not — README'nin üst kısmındaki "Foremen ve tesis şefleri sistemin kullanıcısı
+değildir" ifadesi artık kısmen güncel değil**: RBAC ile birlikte Formen rolü,
+sınırlı (Genel Bakış + Performans, salt-okunur) bir erişimle sisteme gerçek bir
+kullanıcı sınıfı olarak eklendi. Bu bilinçli bir kapsam genişletmesidir.
+
+### Permission listesi
+
+Tek doğruluk kaynağı: `backend/app/core/permissions.py::Permission` (backend) ve
+`frontend/src/auth/permissions.ts` (frontend, yalnızca tip tanımı — eşleme
+tutmaz, her zaman `/auth/me`'den okur).
+
+```
+overview.view                      — Genel Bakış
+performance.view                   — Performans (Tesisler/Gruplar/Formenler/KPI)
+operational_intelligence.view      — Operasyonel Zekâ (Tespitler/Vardiya Analizi/Impact+ görüntüleme)
+operational_impact.contribute      — Operational Impact+ katkı oluşturma/düzenleme/silme
+outputs.view                       — Çıktılar (Yönetici Özeti/Raporlar listesi)
+reports.create                     — Rapor oluşturma
+reports.download                   — Rapor indirme
+```
+
+### Rol → Permission eşlemesi
+
+| Permission | Formen | Şef | Operasyon Yöneticisi |
+|---|:-:|:-:|:-:|
+| `overview.view` | ✅ | ✅ | ✅ |
+| `performance.view` | ✅ | ✅ | ✅ |
+| `operational_intelligence.view` | ❌ | ✅ | ✅ |
+| `operational_impact.contribute` | ❌ | ✅ | ✅ |
+| `outputs.view` | ❌ | ❌ | ✅ |
+| `reports.create` | ❌ | ❌ | ✅ |
+| `reports.download` | ❌ | ❌ | ✅ |
+
+`ROLE_PERMISSIONS: dict[Role, frozenset[Permission]]` (`app/core/permissions.py`)
+her rolü **açık bir permission kümesi** olarak tanımlar — inheritance zinciri veya
+`role_level >= N` gibi bir hiyerarşi karşılaştırması hiçbir yerde yoktur. Yeni bir
+rol (ör. ileride `READ_ONLY`/`REPORT_USER`) eklemek yalnızca bu dict'e bir satır
+eklemekle olur.
+
+### Scope nasıl çalışır?
+
+Scope, `ALL` / `FACTORY` / `PLANT` olabilir; `FACTORY` tipi satırlar request
+başına üye tesislere genişletilir, böylece her zaman tek bir eksen (`plant_ids`)
+üzerinden karar verilir. `Depends(scoped_filters)` (`app/schemas/common.py` +
+`app/api/authz_deps.py`), mevcut `Filters` dataclass'ını kullanan tüm liste/toplu
+uçlarda (dashboard, plants, chiefs, foremen, kpis, shift-analysis) otomatik olarak
+scope daraltması uygular: istenen id'ler scope ile kesiştirilir (kesişim boşsa
+sonuç boş döner, hata değil). Tek bir kaynağa ID ile erişimde (ör.
+`GET /plants/{id}`) ise `assert_plant_in_scope`/`assert_chief_in_scope`/
+`assert_foreman_in_scope`/`assert_plant_ids_in_scope` çağrılır ve scope dışıysa
+**403** döner.
+
+### Yeni bir permission nasıl eklenir?
+
+1. `app/core/permissions.py::Permission`'a yeni değer ekle.
+2. İlgili rol(ler)in `ROLE_PERMISSIONS` kümesine ekle.
+3. `frontend/src/auth/permissions.ts::Permission` union tipine aynı string'i ekle.
+4. Koruman gereken endpoint(ler)e `Depends(require_permission(Permission.X))` ekle.
+5. Frontend'de ilgili nav öğesine/butona `permission`/`<Can permission="...">` ekle.
+
+### Yeni bir rol nasıl eklenir?
+
+`app/models/enums.py::Role`'a yeni değer ekle, migration'da Postgres enum'ına
+ekle (`ALTER TYPE user_role ADD VALUE ...`), `ROLE_PERMISSIONS`'a satır ekle,
+`frontend/src/auth/permissions.ts::Role` ve `ROLE_LABELS_TR`'ye ekle.
+
+### Bir endpoint nasıl korunur?
+
+```python
+_require_performance = require_permission(Permission.PERFORMANCE_VIEW)
+
+@router.get("/{plant_id}")
+def get_plant(plant_id: UUID, db=Depends(get_db), ctx: AuthContext = Depends(_require_performance)):
+    assert_plant_in_scope(ctx, plant_id)   # resource-by-id ise
+    ...
+```
+
+`if user.role == "..."` gibi route gövdesine dağılmış kontroller bu projede
+kullanılmaz — tek merkezi mekanizma `require_permission`/`assert_*_in_scope`'tur.
+
+### Bir frontend component'i nasıl korunur?
+
+```tsx
+<Can permission="reports.create">
+  <button onClick={...}>Rapor Oluştur</button>
+</Can>
+```
+
+Route seviyesinde `<ProtectedRoute permission="outputs.view">...</ProtectedRoute>`
+(`App.tsx`) — yetkisizse `<ForbiddenPage/>` gösterir. **Frontend kontrolü yalnızca
+UX'tir**; gerçek yetkilendirme her zaman backend'de tekrar yapılır.
+
+### Rol/scope nasıl atanır?
+
+```bash
+docker compose exec backend python -m app.cli assign-role <subject> SUPERVISOR --scope-type PLANT --plant-id <uuid> --plant-id <uuid2>
+docker compose exec backend python -m app.cli assign-role <subject> OPERATIONS_MANAGER --scope-type ALL
+docker compose exec backend python -m app.cli revoke-role <subject>   # rol+scope'u tamamen kaldırır, subject artık default-deny (403)
+```
+
+Yerel geliştirmede `seed` komutu, `dev-demo-user`/`dev-user`/`sef-demo-user`/
+`formen-demo-user` subject'lerine otomatik olarak (sırasıyla Operasyon Yöneticisi/
+Operasyon Yöneticisi/Şef/Formen) rol atar — bkz. `app/cli.py::_seed_dev_role_assignments`
+(yalnızca `ENVIRONMENT=development`).
+
+### Audit log
+
+Hepsi mevcut `record_audit`/`audit_logs` altyapısına yazılır — ayrı bir logging
+sistemi kurulmamıştır. `AuditLog.subject` her zaman **aktörü** (işlemi yapan),
+`entity` ise **hedefi** (üzerinde işlem yapılan kaynak/subject) taşır.
+
+| Action | Ne zaman yazılır | Kaynak |
+|---|---|---|
+| `overview`/`performance`/vb. endpoint'lerde `permission.denied` | Yalnızca POST/PATCH/DELETE red'lerinde (rutin GET red'leri loglanmaz — spam önleme) | `app/api/authz_deps.py::require_permission` |
+| `role.assigned` | `assign-role` CLI komutu (veya `seed`'in dev-rol bootstrap adımı) bir subject'e rol atadığında/değiştirdiğinde | `app/services/authz_admin.py::assign_role` |
+| `role.revoked` | `revoke-role` CLI komutu bir subject'in rol atamasını kaldırdığında (atama yoksa da `success=False` ile idempotent şekilde yazılır) | `app/services/authz_admin.py::revoke_role` |
+| `scope.assigned` | `assign-role` her çağrıldığında (rol ile birlikte, scope her zaman tam olarak yeniden yazıldığı için ayrı bir olay) | `app/services/authz_admin.py::assign_role` |
+| `scope.revoked` | `revoke-role` çağrıldığında, `role.revoked` ile birlikte | `app/services/authz_admin.py::revoke_role` |
+| `report.created` | `POST /reports/generate` başarıyla bir rapor ürettiğinde | `app/services/report_service.py::generate_report` |
+| `report.downloaded` | `GET /reports/{id}/download` başarıyla indirildiğinde | `app/services/report_service.py::download_report` |
+| `operational_impact.created`/`.updated`/`.deleted` | Bir Operational Impact+ çalışması oluşturulduğunda/güncellendiğinde (gerçek bir alan değiştiyse)/silindiğinde | `app/services/contribution_work_service.py` |
+
+**`permission.override.changed` yok — kasıtlı**: bu sistemde per-user/per-request
+permission override mekanizması yoktur. `ROLE_PERMISSIONS` (`app/core/permissions.py`)
+kod içinde tanımlı statik bir dict'tir; bir kullanıcının permission'ları her zaman
+yalnızca rolünden gelir (görev talimatının "ROL ≠ YETKİ ama rol bir permission
+paketidir" ilkesiyle tutarlı — paket rol bazında sabittir, kullanıcı bazında
+esnetilmez). Runtime'da değişen tek şey rol ve scope atamasıdır, ki bunlar zaten
+yukarıdaki dört event ile izlenir. Böyle bir override özelliği ileride eklenirse
+(ör. bir role bağlı olmayan tekil permission ekleme/çıkarma), o zaman gerçek bir
+`permission.override.changed` audit'i eklenmelidir — bugün var olmayan bir
+mekanizma için sahte bir audit çağrısı eklenmedi.
+
 ## Backend API
 
 Tüm uçlar `/api/v1` altında, doğrulanmış bir OIDC access token (`Authorization:
@@ -499,12 +728,75 @@ ayrı bir API/ekran bulunmaz, yalnızca dahili iz kaydı olarak tutulur. Kimlik
 doğrulama (login/logout) artık uygulama içinde gerçekleşmediği için bu olaylar
 Red Hat SSO'nun kendi oturum/audit kayıtlarında izlenir.
 
+## Logging
+
+Uygulama logları dosyaya değil stdout/stderr'e yazılır — Docker'da doğrudan
+izlenir, ayrı bir log dosyası/rotasyon yapılandırması gerekmez:
+
+```bash
+docker compose logs -f backend
+```
+
+Log yapılandırması `app/core/logging_config.py::configure_logging()` içinde
+merkezi olarak tanımlanır (`logging.config.dictConfig`, `disable_existing_loggers=False`)
+ve backend başlarken (`app/main.py`) kesin olarak yüklenir. Her satır tek satırlık
+JSON'dur — Docker/production log toplama sistemleri (CloudWatch, Loki, ELK vb.)
+tarafından doğrudan ayrıştırılabilir:
+
+```json
+{"timestamp": "2026-09-15T10:22:41.123+00:00", "level": "INFO", "logger": "app.access", "message": "GET /api/v1/dashboard/summary 200 12.40ms", "request_id": "b3f6c8e2-...", "subject": "f4b1c9a0-oidc-sub", "method": "GET", "path": "/api/v1/dashboard/summary", "client_ip": "203.0.113.5", "status_code": 200, "duration_ms": 12.4}
+{"timestamp": "2026-09-15T10:22:41.140123+00:00", "level": "INFO", "logger": "app.audit", "message": "audit action=report.created entity=report_export success=True", "request_id": "b3f6c8e2-...", "subject": "f4b1c9a0-oidc-sub", "method": null, "path": null, "client_ip": "203.0.113.5", "action": "report.created", "entity": "report_export", "success": true}
+```
+
+**Korelasyon:** `RequestIdMiddleware` (`app/core/request_id.py`) gelen
+`X-Request-Id` header'ını doğrular (geçersiz/eksikse yeni bir UUID üretir),
+`app/core/log_context.py`'deki `ContextVar`'lara (`request_id`, `method`, `path`,
+`client_ip`) request süresince bağlar ve response header'ına aynı ID'yi geri
+yazar — response'taki `X-Request-Id` ile o isteğe ait tüm log satırlarındaki
+`request_id` her zaman birebir aynıdır. Context, isteğin sonunda (başarı, hata
+veya exception fark etmeksizin `finally` içinde) sıfırlanır; paralel istekler
+kendi `ContextVar` kopyalarında çalıştığından birbirine karışmaz.
+
+`app/api/deps.py::get_current_identity` OIDC doğrulamasından (veya
+`AUTH_BYPASS=true` iken `dev-demo-user`'dan) sonra `subject`'i hem
+`request.state.subject`'e hem log context'ine yazar — bu yüzden aynı isteğin
+access log'u ve varsa audit log'u aynı `subject`'i taşır. `subject`'i doğrudan
+parametre olarak alan servis/audit çağrıları (`record_audit` dahil) context'e
+değil bu parametreye güvenir; bu, OIDC doğrulamasının FastAPI tarafından ayrı
+bir thread'de çalıştırılmasından bağımsız olarak güvenilir çalışır.
+
+Her istek için tek bir INFO (4xx için WARNING, 5xx için ERROR) access log satırı
+`app.access` logger'ından üretilir — `method`, `path`, `status_code`,
+`duration_ms`, `request_id`, `subject`, `client_ip` içerir. Uvicorn'un kendi
+access logger'ı (`uvicorn.access`) `logging_config.py` içinde handler'sız
+bırakılarak susturulur, aksi halde her istek iki kez (farklı biçimlerde)
+loglanırdı.
+
+`app/services/audit.py::record_audit()` — katkı çalışması CRUD, tespit
+durumu/analiz güncelleme, rapor oluşturma/indirme ve aylık rapor
+indirme/erişim gibi denetlenebilir her eylemin tek merkezi noktasıdır —
+`audit_logs` tablosuna yazmanın yanında `app.audit` logger'ından bir INFO
+(başarısızsa WARNING) log satırı da üretir: `action`, `entity`, `subject`,
+`success`, `client_ip`. `old_value`/`new_value` işletme verisi (başlık, durum
+diff'i vb.) içerebileceğinden bu uygulama logunda **taşınmaz** — yalnızca
+`audit_logs` tablosunda saklanır.
+
+**Hassas veri:** Authorization header, access/refresh token, parola, secret,
+request body ve LLM prompt/response hiçbir logda görünmez —
+`tests/integration/test_logging.py` bunu doğrular. `path` yalnızca URL path'idir
+(query string dahil değildir), böylece bir query parametresine sızmış olası bir
+token bile log'a taşınmaz.
+
+Yeni bir ortam değişkeni gerekiyorsa: `LOG_LEVEL` (varsayılan `INFO`) root ve
+`app.*` logger'larının minimum seviyesini kontrol eder — bkz.
+[Ortam Değişkenleri](#ortam-değişkenleri).
+
 ## Tespitler Modülü (Anomali Tespiti + Yapay Zekâ Analizi)
 
 **Amaç:** Üretim verilerindeki olağan dışı durumları ("Ağır Gitme", "GSF",
-"Iskarta", "İnkita", "Plana Uyum" KPI'larında) yöneticilere göstermek, önem
-derecesi ve durumlarını takip etmek ve her tespit için isteğe bağlı bir yapay
-zekâ analizi üretmek. Modül iki kademede geliştirilmiştir:
+"Iskarta", "İnkita", "Plana Uyum", "OEE" KPI'larında) yöneticilere göstermek,
+önem derecesi ve durumlarını takip etmek ve her tespit için isteğe bağlı bir
+yapay zekâ analizi üretmek. Modül iki kademede geliştirilmiştir:
 
 - **Aşama 1 — Sentetik Veriyle Prototip**: tüm bağlam LLM'e tek pakette
   gönderilir (`single_context` modu, aşağıda anlatılıyor).
@@ -736,10 +1028,13 @@ araç adı, hatalı argüman, zaman aşımı, bir araç başarısız olsa bile a
 tamamlanması, uydurma kaynak referanslarının ayıklanması, tool calling
 desteklenmeyen modelde `single_context`'e düşüş), demo tool calling akışının
 gerçek araçları çalıştırması ve `single_context` modunun bozulmadan çalışmaya
-devam etmesi. Frontend tarafında
-`frontend/scripts/smoke_test_anomalies.mjs` ve
-`frontend/scripts/smoke_test_tool_calling.mjs` (Playwright) liste sayfası,
-filtreleme, detay sayfası ve analiz akışını uçtan uca doğrular.
+devam etmesi. Frontend tarafında Playwright kritik smoke suite'i
+(`frontend/scripts/smoke/dashboard-and-nav.spec.ts`) `/anomalies` liste
+sayfasının açıldığını doğrular; tool-calling destekli AI analiz akışının
+uçtan uca (LLM'e gerçekten istek atarak) doğrulanması dış bağımlılık +
+uzun süre gerektirdiğinden CI-critical suite dışında,
+`frontend/scripts/manual/smoke_test_tool_calling.mjs` ile manuel
+çalıştırılır — bkz. [Playwright Smoke Testleri](#playwright-smoke-testleri).
 
 ## Katkılar
 
@@ -926,6 +1221,72 @@ akışı devreye alınamaz (kod ve Terraform hazırdır, deploy edilmemiştir):
   (`SMTP_ENABLED=true`, `SMTP_HOST`, `SMTP_USERNAME`/`SMTP_PASSWORD`,
   `SMTP_FROM`) — sır olan alanlar merkezi sır yönetimi servisinden inject
   edilmelidir, `.env`'e yazılmamalıdır
+
+## DB Connection Pool
+
+`app/db/session.py`, tek bir SQLAlchemy `engine`'i process başına bir kez
+kurar (`app/main.py` import edildiğinde) ve her HTTP isteği `get_db()`
+dependency'si üzerinden `SessionLocal()` alıp `finally` bloğunda kapatır —
+istek başına bir session, sızıntı riski yok. Scheduler (`backend/scheduler/`)
+ayrı bir container/process'tir; `app.cli` her cron job'ında kendi Python
+sürecini başlatır, dolayısıyla kendi engine/pool'unu kurar ve süreç bitince
+tüm bağlantıları serbest bırakır — API'nin pool'uyla hiçbir şey paylaşmaz.
+
+Backend `uvicorn app.main:app --host 0.0.0.0 --port 8000` ile **tek worker
+process** olarak çalışır (bkz. `backend/Dockerfile` `CMD`) — `--workers` bayrağı
+yoktur. Senkron (`def`, `async def` değil) route handler'lar FastAPI/Starlette
+tarafından bir thread pool'da çalıştırılır (anyio varsayılanı: en fazla 40
+eşzamanlı thread). Bu, "40 thread çalışıyorsa pool'u da 40 yap" sezgisinin
+kaynağıdır — ama yanlıştır: gerçek üst sınır `pool_size + max_overflow`'dur,
+thread sayısı değil; 40 thread aynı anda DB'ye ulaşmaya çalışırsa havuzun
+gerçek kapasitesi kadarı hemen bağlantı alır, kalanı `pool_timeout` kadar
+kuyrukta bekler.
+
+Havuz parametreleri `DB_POOL_SIZE` / `DB_MAX_OVERFLOW` / `DB_POOL_TIMEOUT` /
+`DB_POOL_RECYCLE` ile yapılandırılabilir (bkz. [Ortam Değişkenleri →
+Database](#ortam-değişkenleri)); `Settings` bunları doğrular (negatif/0
+değerler reddedilir). **`DB_POOL_SIZE`/`DB_MAX_OVERFLOW`/`DB_POOL_TIMEOUT`
+varsayılanları (5 / 10 / 30) SQLAlchemy `QueuePool`'un kendi varsayılanlarıyla
+aynıdır — bir "production optimum değeri" iddiası değildir**, yalnızca
+önceden örtük olan davranışı açık ve configurable hale getirir.
+**`DB_POOL_RECYCLE` istisnadır: SQLAlchemy'nin kendi varsayılanı `-1`'dir
+(süreye göre hiç recycle etmez); bu proje bilinçli olarak `1800`
+(30 dakika) varsayılıyor** — uzun süre boşta kalan bağlantıların bir
+firewall/proxy/PgBouncer tarafından sessizce kesilmesine karşı bir güvenlik
+payı. `pool_pre_ping=True` her koşulda korunur (bayat/kopmuş bağlantıları
+sessizce reddetmek yerine yeniden kurar).
+
+Production'da doğru değer şu bütçeyle birlikte değerlendirilmelidir:
+
+```text
+toplam olası bağlantı ≈ backend process sayısı × (pool_size + max_overflow)
+                         + scheduler'ın aynı anda açtığı bağlantılar
+                         + psql/pgAdmin gibi diğer manuel/araç bağlantıları
+```
+
+ve bu toplam gerçek PostgreSQL `max_connections` değeriyle karşılaştırılmalıdır.
+Bu repo tek başına şunu **bilemez**: production'da kaç backend process/replica
+çalışacağını, PostgreSQL'in gerçek `max_connections`'ını, ya da beklenen
+eşzamanlı kullanıcı sayısını — bunlar production ortamında ayrıca ölçülüp
+doğrulanmalıdır.
+
+Havuz tükendiğinde (`pool_size + max_overflow` aşılıp `pool_timeout` süresi
+dolduğunda) SQLAlchemy `TimeoutError` fırlatır; bu genel bir 500 yerine `503
+DB_POOL_EXHAUSTED` olarak dönülür (`app/core/error_handlers.py`) — kapasite
+sorununu uygulama hatasından ayırt etmek için. Aynı zamanda `app/db/session.py`
+içindeki bir `checkout` event listener'ı, havuz `max_overflow`'a taştığı her
+an `app.db.pool` logger'ında bir WARNING satırı üretir (checked_out/size/
+overflow sayılarıyla) — credential veya connection string içermez, ve yalnızca
+gerçek bir kapasite baskısı anında tetiklenir (her sorguda değil).
+
+`backend/scripts/load_test.py`, bu davranışı yerel/test ortamında gözlemlemek
+için eklenmiş minimal bir yük testi aracıdır (CI'ın parçası değildir, `httpx`
+dışında bağımlılık gerektirmez):
+
+```bash
+python scripts/load_test.py --base-url http://localhost:8000 \
+    --endpoint /api/v1/foremen --concurrency 10 20 40 60 100 --requests 40
+```
 
 ## Job Claiming & Concurrency
 
@@ -1123,7 +1484,7 @@ Recharts sarmalayıcıları), `context/` (`AuthContext`, `ThemeContext`),
 Arayüz dili Türkçedir; tasarımda emoji kullanılmaz, ikonlar
 `lucide-react`'ten gelir. Tema tamamen CSS custom property'leri üzerinden
 çalışır (`index.css`, `:root[data-theme="dark"|"light"]`), `ThemeContext`
-tarafından yönetilir ve varsayılan olarak koyu temadır (localStorage'da
+tarafından yönetilir ve varsayılan olarak açık (light) temadır (localStorage'da
 kalıcı). Recharts renk/tooltip prop'ları CSS değişkeni kabul etmediği için
 `lib/chartColors.ts` içindeki tema-duyarlı yardımcılar (`resolveChartInk`,
 `accentLineColor`, `categoricalColor`) kullanılır.
@@ -1141,10 +1502,8 @@ okunur (`src/config/runtimeConfig.ts`) — `npm run dev` bu dosyayı hiç
 görmediği için o zaman `import.meta.env.VITE_*`'a düşülür, dev deneyimi
 değişmez.
 
-`frontend/scripts/*.mjs` altında Playwright ile yazılmış smoke test
-betikleri bulunur (login, filtreleme, sıralama, PDF render, logo gibi
-senaryolar); `frontend/` dizininden çalıştırılmalıdır (playwright oradan
-çözülür).
+Playwright ile yazılmış bir kritik-yol smoke suite'i ve ayrı manuel görsel
+denetim script'leri bulunur — bkz. [Playwright Smoke Testleri](#playwright-smoke-testleri).
 
 ## Veritabanı Şeması
 
@@ -1663,7 +2022,7 @@ npm run lint        # oxlint
 
 ```bash
 cd backend
-.venv/Scripts/python.exe -m pytest -q                      # tüm paket (712 test fonksiyonu)
+.venv/Scripts/python.exe -m pytest -q                      # tüm paket (1221 test — 1189 passed + 32 skipped, 2026-09-17 final teslimat denetiminde taze DB'ye karşı doğrulandı)
 .venv/Scripts/python.exe -m pytest tests/unit -q            # yalnızca unit (DB gerekmez)
 .venv/Scripts/python.exe -m pytest tests/integration/test_reports.py -q
 .venv/Scripts/python.exe -m pytest tests/unit/test_kpi_engine.py::TestX::test_y -q
@@ -1694,8 +2053,207 @@ cd backend
   [Job Claiming & Concurrency](#job-claiming--concurrency).
 
 `pytest.ini`, `testpaths = tests` ve `pythonpath = .` tanımlar; ek yapılandırma
-gerekmez. Otomatik CI pipeline'ı (GitHub Actions vb.) bu depoda **tanımlı
-değildir** — testler manuel çalıştırılır.
+gerekmez. Otomatik CI pipeline'ı [CI/CD](#cicd) bölümünde açıklanır — testler
+artık her PR'da ve `main`'e her push'ta otomatik çalışır.
+
+### Playwright Smoke Testleri
+
+`frontend/scripts/` iki ayrı kategoriye ayrılır:
+
+- **`frontend/scripts/smoke/*.spec.ts`** — `@playwright/test` ile yazılmış,
+  gerçek `expect()` assertion'ları içeren küçük bir **kritik-yol** suite'i
+  (`frontend/playwright.config.ts`). Kapsadığı kritik yollar: dashboard
+  açılır ve ana başlık görünür; `/plants`, `/groups`, `/foremen`, `/kpis`
+  sayfalarına navigasyon; operasyonel zekâ alanlarının (`/anomalies`,
+  `/shift-analysis`, `/improvement-works`) açılması; mobil hamburger menüsü;
+  ve AUTH_BYPASS dev/demo modunun kendi sözleşmesi (login'e girmeden
+  dashboard açılır, `/login` dashboard'a geri döner). Her test sayfa
+  başlığının (`<h1>`) göründüğünü VE ne konsolda ne `/api/v1/` isteklerinde
+  hata olmadığını doğrular — yalnızca ekran görüntüsü alıp insanın bakmasını
+  bekleyen bir script değildir.
+
+  **Önkoşul:** `AUTH_BYPASS=true`/`VITE_AUTH_BYPASS=true` ile çalışan bir
+  stack (bkz. [Development Demo Mode](#development-demo-mode)) — bu suite
+  bilerek gerçek Keycloak login akışını atlar, çünkü amaç kritik-yol
+  navigasyonunu hızlı ve deterministik doğrulamaktır, RBAC'ı değil (RBAC
+  ayrı bir manuel script'tir, aşağıya bkz.). `seed` komutu
+  `ENVIRONMENT=development` iken `dev-demo-user` subject'ine otomatik
+  Operasyon Yöneticisi rolü atadığından (`app/cli.py::_seed_dev_role_assignments`),
+  ek bir rol ataması gerekmez.
+
+  ```bash
+  docker compose -f docker-compose.yml -f docker-compose.db.yml up --build -d
+  # .env: ENVIRONMENT=development, AUTH_BYPASS=true, VITE_AUTH_BYPASS=true
+  docker compose exec backend python -m app.cli seed --seed 42
+  cd frontend
+  npx playwright install --with-deps chromium   # bir kerelik
+  npm run smoke              # tüm suite, headless
+  npm run smoke:headed       # tarayıcı görünür şekilde
+  npm run smoke:debug        # Playwright Inspector ile adım adım
+  ```
+
+  `TARGET_BASE` ortam değişkeniyle farklı bir host'a karşı çalıştırılabilir
+  (varsayılan `http://localhost:8080`).
+
+- **`frontend/scripts/manual/*.mjs`** — CI-critical **sayılmayan**, elle
+  çalıştırılan görsel denetim / derin senaryo script'leri (ham `playwright`
+  paketiyle, `node` üzerinden çalışır). Her biri neden CI dışı bırakıldığını
+  dosya başındaki yorumda açıklar:
+
+  | Script | Ne doğrular | Önkoşul | Komut |
+  |---|---|---|---|
+  | `smoke_test_rbac.mjs` | 3 rolün (Operasyon Yöneticisi/Şef/Formen) nav görünürlüğü, doğrudan URL erişiminde 403, action-level buton görünürlüğü | **Gerçek** local Keycloak login (bkz. [Yerel Geliştirme: Local Keycloak](#yerel-geliştirme-local-keycloak)) — AUTH_BYPASS ile çalışmaz, çünkü bypass tek bir sabit role bağlanır | `npm run smoke:manual:rbac` |
+  | `smoke_test_tool_calling.mjs` | Tespitler'de tool-calling destekli AI analiz akışı uçtan uca | AUTH_BYPASS + `seed-anomalies` + LLM sağlayıcı yapılandırılmış olmalı; ~90sn sürebilir | `npm run smoke:manual:tool-calling` |
+  | `smoke_test_monthly_report.mjs` | Formen aylık rapor sayfası + PDF indirme | AUTH_BYPASS | `npm run smoke:manual:monthly-report` |
+  | `smoke_test_shift_heatmap_and_matrix.mjs` | Vardiya Analizi heatmap → drilldown → Formen–Vardiya matrisi (light/dark) | AUTH_BYPASS | `npm run smoke:manual:shift-heatmap` |
+  | `responsive_audit.mjs` | Dashboard'ın farklı viewport genişliklerinde yatay taşma (overflow) üretip üretmediği | AUTH_BYPASS | `npm run smoke:manual:responsive` |
+  | `responsive_audit_other_pages.mjs` | `/plants`, `/foremen`, `/kpis` için aynı overflow kontrolü | AUTH_BYPASS | `npm run smoke:manual:responsive-pages` |
+  | `smoke_test_pdf_render.mjs` | İndirilen bir PDF'i Chromium ile açıp PNG'ye render eder (görsel doğrulama) | Yerel bir PDF dosyası | `node scripts/manual/smoke_test_pdf_render.mjs <pdfPath> [outName.png]` |
+
+  Tümü `TARGET_BASE` (varsayılan `http://localhost:8080`) ve
+  `SMOKE_SHOT_DIR` (varsayılan `frontend/scripts/.smoke-output/`, git'e
+  dahil değil) ortam değişkenlerini okur — kişisel makine path'i veya
+  hardcoded ekran görüntüsü klasörü yoktur.
+
+  Ortak yardımcılar (`BASE`/`SHOT_DIR` çözümleme, console/pageerror/
+  `/api/v1/` 4xx-5xx toplama, gerçek Keycloak login) `frontend/scripts/smoke_helpers.mjs`'de
+  tek yerde toplanır; hem `smoke/*.spec.ts` hem `manual/*.mjs` bunu kullanır.
+
+  **Neden eski script'lerin çoğu silindi:** `frontend/scripts/` altında
+  daha önce 46 script vardı; 33'ü uygulamanın artık var olmayan eski bir
+  e-posta/şifre login formunu (`input[type="email"]`) doldurmaya
+  çalışıyordu — güncel `LoginPage` (`src/pages/LoginPage.tsx`) yalnızca
+  Red Hat SSO/Keycloak'a yönlendiren tek bir buton içerir, bu yüzden o 33
+  script bugün ilk adımda hata veriyordu. Kalanların büyük kısmı da aynı
+  redesign/özellik checkpoint'inin (ör. anomali detay sayfasının 4 ayrı
+  ara sürümü, dashboard'ın 3 ayrı redesign taslağı) tekrarlanan, assertion
+  içermeyen (yalnızca `console.log` ile insan gözüyle kontrol amaçlı)
+  ekran görüntüleriydi. Bu script'ler; ya yukarıdaki assertion'lı kritik-yol
+  suite'ine dönüştürüldü, ya (gerçekten farklı/derin bir senaryo kapsıyorsa)
+  manuel kategoriye taşınıp düzeltildi, ya da doğrudan silindi (kapsamı
+  zaten kritik-yol suite'i veya başka bir manuel script tarafından
+  kapsanıyorsa).
+
+## CI/CD
+
+Tüm workflow'lar `.github/workflows/` altında, GitHub Actions üzerinde çalışır.
+Üçüncü parti action'ların tamamı immutable commit SHA'sına pinlenmiştir (tag'e
+değil) — `tier1/playbook-cicd-security.md`'nin tedarik zinciri güvenliği
+ilkesiyle tutarlı.
+
+### `backend-ci.yml` — CI (zorunlu, PR merge'i bloklar)
+
+Tetikleyiciler: `pull_request`, `push` (`main`), `workflow_dispatch`.
+
+- **`lint`** — `backend/pyproject.toml`'daki dar kapsamlı ruff kuralına
+  (`E9,F63,F7,F821,F822` — yalnızca syntax hatası/tanımsız isim sınıfı, stil
+  kuralı değil) karşı `app/` ve `tests/`'i denetler. Bilinçli olarak dar: repo
+  genelinde ruff'ın varsayılan/geniş kural setiyle **464 pre-existing bulgu**
+  var (stil/format ağırlıklı) — bunları tek CI görevinde blocking yapmak,
+  `tier0/RULES.md` §15'in uyardığı "yüzlerce eski hatayla CI'ı kullanılamaz
+  hale getirme" durumudur; follow-up olarak dokümante edildi, gizlenmedi.
+  `app/models/foreman.py` ve `app/models/organization.py`'deki 2 F821 bulgusu
+  (`per-file-ignores`) SQLAlchemy `Mapped[list["X"]]` forward-reference
+  deseninin bilinen, doğrulanmış false-positive'idir — dairesel import'u
+  önlemek için sınıf adı stringle referanslanır, gerçek çözümleme SQLAlchemy
+  mapper registry'si üzerinden runtime'da olur.
+- **`test`** — backend'in **tüm** pytest paketini (`python -m pytest -q`,
+  unit + integration, ~1201 test) çalıştırır; yalnızca `tests/unit` ile
+  yetinmez. Integration testler `tests/integration/_ephemeral_db.py`
+  üzerinden kendi Testcontainers Postgres'ini başlatır — `ubuntu-latest`
+  runner'ının önceden kurulu Docker daemon'ı bunun için yeterlidir, ek
+  Docker-in-Docker kurulumu yoktur. Job-level env `DEBUG=false`,
+  `AUTH_BYPASS=false`, `ENVIRONMENT=test` açıkça sabitlenir; `DATABASE_URL`/
+  `POSTGRES_*` **bilerek tanımlanmaz** — kalıcı/app DB'ye fallback mümkün
+  değildir, tek DB kaynağı `_ephemeral_db.py`'nin başlattığı geçici
+  container'dır. Toplanan test sayısı için sabit bir hedef (ör. 998) yerine
+  yalnızca "collection tamamen kırıldı mı" felaketini yakalayan kaba bir taban
+  (`< 100` ise fail) kullanılır — gerçek sayı zamanla değiştikçe kırılgan bir
+  gate olmasın diye.
+
+Bu iki job, branch protection'da **required status check** olarak
+seçildiğinde PR merge'ini/`main`'e push'u bloklar — **bu seçim workflow
+dosyasıyla otomatik olarak garanti edilmez**, repo ayarlarına erişimi olan biri
+GitHub'da *Settings → Branches → Branch protection rules* (veya yeni
+Rulesets) altında `ruff (backend)` ve `pytest (full suite)` check'lerini
+required olarak işaretlemelidir.
+
+### `frontend-ci.yml` — CI (frontend lint + typecheck + build)
+
+Tetikleyiciler: `pull_request`, `push` (`main`), `workflow_dispatch`.
+
+- **`lint-and-build`** — `npm ci`, `npm run lint` (oxlint), `npm run build`
+  (`tsc -b && vite build`). Backend tarafındaki `backend-ci.yml`'nin frontend
+  karşılığıdır; öncesinde frontend'in CI'da hiç doğrulanmadığı bir boşluğu
+  kapatır.
+
+Playwright kritik-yol smoke suite'i (bkz.
+[Playwright Smoke Testleri](#playwright-smoke-testleri)) **bilerek bu
+workflow'a bağlanmadı** — gerçekçi bir çalıştırma postgres+backend+frontend'i
+`AUTH_BYPASS=true` ile ayağa kaldırıp seed etmeyi gerektirir; bu,
+`backend-ci.yml`'nin tek-servisli Testcontainers deseninden daha ağır,
+çok-servisli bir CI adımıdır ve doğrulanmamış/test edilmemiş bir workflow'u
+sessizce merge etmek yerine yerelde çalıştırılacak şekilde bırakıldı
+(`frontend-ci.yml` içinde bu kararın gerekçesi ve ileride nasıl
+ekleneceği yorum olarak yazılıdır).
+
+### `security-scan.yml` — statik güvenlik/tedarik zinciri
+
+- **`secret-scan`** (gitleaks, **blocking**) — tüm git geçmişine karşı çalışır.
+  2026-09-16'da tüm geçmiş (10 commit) lokal olarak tarandı: **0 bulgu** —
+  baseline temiz olduğu için blocking olarak eklendi, blanket-ignore/allowlist
+  gerekmedi.
+- **`dependency-audit`** (`pip-audit`, **blocking**) —
+  `backend/requirements.txt`'i tarar. 2026-09-16 baseline'ı **5 pakette 20
+  tekil advisory** taşıyordu (`starlette` 0.38.6, `cryptography` 49.0.0,
+  `pyasn1` 0.4.8 [transitive, `python-jose`'un `pyasn1<0.5.0` pininden],
+  `python-multipart` 0.0.9, `ecdsa` 0.19.2). 2026-09-18'de `fastapi` 0.133.1'e
+  (starlette üst sınırını kaldıran minimum sürüm), `starlette` 1.3.1'e,
+  `python-jose[cryptography]` 3.5.0'a (pyasn1 pinini `>=0.5.0`'a gevşetir),
+  `cryptography` 50.0.1'e ve `python-multipart` 0.0.32'ye yükseltilerek 20
+  advisory'nin 19'u kapatıldı; kalan tek bulgu `ecdsa` `PYSEC-2026-1325`
+  (GHSA-wj6h-64fc-37mp / CVE-2024-23342, imzalama sırasında Minerva timing
+  side-channel'ı — upstream düzeltme planlamıyor, doğrulama etkilenmiyor ve bu
+  uygulama yalnızca RS256 ile doğrulama yapıp hiç ECDSA imzalamıyor) CI'da
+  `--ignore-vuln PYSEC-2026-1325` ile açıkça belgelenmiş tek istisna olarak
+  allowlist'lendi — bkz. `tier2/06-security.md` "Bağımlılık Güvenliği
+  İstisnası" için tam gerekçe/kanıt/gözden geçirme koşulu. Job artık
+  `continue-on-error` taşımıyor; herhangi bir yeni/allowlist dışı bulgu CI'ı
+  kırar.
+
+### `codeql.yml` — SAST (informational)
+
+Python için CodeQL (`build-mode: none`, yorumlanan dil). Repo public olduğu
+için ücretsizdir (GHAS lisansı gerekmez). Bulgular *Security → Code scanning
+alerts*'te görünür; workflow'un kendisi PR'ı bloklamaz — bloklayıcı yapmak
+isteniyorsa ayrıca required check olarak seçilmelidir.
+
+### `docker-build.yml` — CD (image build + publish)
+
+- **`build`** — her PR/push'ta backend + frontend imajlarının gerçekten build
+  olduğunu doğrular (`push: false`), fork PR'larında da credential
+  gerektirmeden güvenle çalışır.
+- **`publish`** — yalnızca `push` event'inde çalışır (`pull_request` bu job'ı
+  hiç tetiklemez, dolayısıyla fork PR'ları publish edemez); imajları
+  `ghcr.io/<owner>/formen-takip-{backend,frontend}`'e yalnızca GitHub'ın kendi
+  `GITHUB_TOKEN`'ıyla, `packages: write`'ı yalnız bu job'a tanıyarak publish
+  eder — ayrı bir PAT/secret gerekmez.
+
+**Otomatik/gerçek bir sunucuya deploy YOKTUR** — host, SSH/credential, hedef
+ortam bilgisi bu kurulum kapsamında verilmedi.
+
+### `deploy.yml` — manuel deploy iskeleti (bilerek eksik)
+
+Yalnızca `workflow_dispatch` ile tetiklenir. `production` GitHub
+Environment'ında `DEPLOY_SSH_HOST` / `DEPLOY_SSH_USER` / `DEPLOY_SSH_KEY`
+secret'ları tanımlı değilse ilk job (`check-config`) açıkça ve güvenli şekilde
+fail eder — sahte/varsayılan bir hedefe bağlanmayı denemez. Secret'lar
+tanımlansa bile `deploy` job'ı şu an bilerek bir iskelettir (gerçek SSH/
+docker compose komutu yok, `exit 1` ile durur) — gerçek bir production hedefi
+netleşmeden bu workflow "çalışıyormuş gibi" görünen sahte bir deploy
+üretmeyecek şekilde tasarlandı. Gerçek bir hedef netleştiğinde
+[Production Deployment](#production-deployment)'taki üç modelden hangisi
+kullanılıyorsa ona göre `deploy` job'ı doldurulmalıdır.
 
 ## Depoyu Klonladıktan Sonra
 
@@ -1740,6 +2298,7 @@ tablo onun deployment açısından okunur bir özetidir.
 | `APP_DEBUG` | Hayır (varsayılan `false`) | Hayır | İkisi de | Compose üzerinden FastAPI debug modu; production'da `true` ise backend fail-closed başlamaz |
 | `AUTH_BYPASS` / `VITE_AUTH_BYPASS` | Hayır | Hayır | Yalnızca development | `ENVIRONMENT=development` dışında `true` olamaz — backend startup'ı fail-closed reddeder |
 | `CORS_ORIGINS` | Hayır | Hayır | İkisi de | Backend'in kabul ettiği origin listesi (JSON array); production'da `*` fail-closed reddedilir |
+| `LOG_LEVEL` | Hayır (varsayılan `INFO`) | Hayır | İkisi de | Root ve `app.*` logger'larının minimum seviyesi — bkz. [Logging](#logging) |
 
 ### Database
 
@@ -1749,6 +2308,10 @@ tablo onun deployment açısından okunur bir özetidir.
 | `POSTGRES_USER` / `POSTGRES_DB` | Yalnızca `docker-compose.db.yml` kullanılıyorsa | Hayır | İkisi de | Local Postgres servisi |
 | `POSTGRES_PASSWORD` | Yalnızca `docker-compose.db.yml` kullanılıyorsa | **Evet** | İkisi de | |
 | `POSTGRES_BIND` | Hayır (varsayılan `127.0.0.1`) | Hayır | Prod'da önemli | Postgres'in host'a bind edildiği adres — asla `0.0.0.0` olmamalı |
+| `DB_POOL_SIZE` | Hayır (varsayılan `5`) | Hayır | İkisi de | SQLAlchemy pool boyutu — bkz. [DB Connection Pool](#db-connection-pool) |
+| `DB_MAX_OVERFLOW` | Hayır (varsayılan `10`) | Hayır | İkisi de | Taban boyutun üstünde açılabilecek geçici bağlantı sayısı |
+| `DB_POOL_TIMEOUT` | Hayır (varsayılan `30`, saniye) | Hayır | İkisi de | Havuzda boş bağlantı yokken checkout'un bekleyeceği azami süre |
+| `DB_POOL_RECYCLE` | Hayır (varsayılan `1800`, saniye) | Hayır | İkisi de | Bu süreden eski bağlantılar bir sonraki checkout'ta yenilenir; `-1` devre dışı bırakır |
 
 ### OIDC — Backend (token doğrulama)
 
@@ -1773,6 +2336,7 @@ tablo onun deployment açısından okunur bir özetidir.
 |---|---|---|---|---|
 | `BACKEND_UPSTREAM` | Hayır (varsayılan `http://backend:8000`) | Hayır | Multi-server'da zorunlu | Frontend'in backend'i bulduğu adres |
 | `BACKEND_BIND` | Hayır (varsayılan `127.0.0.1`) | Hayır | Prod'da önemli | Backend'in host'a bind edildiği adres — asla `0.0.0.0` olmamalı |
+| `TRUSTED_PROXY_IPS` | Hayır (varsayılan `172.28.5.0/24`, Compose'un sabit subnet'i) | Hayır | **Model 2/3'te (ayrı sunucu) zorunlu override** | Backend'in `X-Forwarded-For` header'ına güvendiği reverse proxy IP/CIDR listesi (virgülle ayrılmış) — audit log'lara (bkz. `audit_logs.ip_address`) gerçek istemci IP'sinin mi yoksa proxy'nin IP'sinin mi yazılacağını belirler (bkz. `app/core/client_ip.py`). Frontend backend'le aynı Compose ağındaysa varsayılan doğru çalışır; frontend/edge ayrı host'taysa (bkz. [Model 2](#model-2--frontend-ve-backend-ayrı-sunucularda)) bu değeri o host'un gerçek private-network IP/CIDR'ına ayarlamazsanız audit log'lara proxy'nin IP'si yazılmaya devam eder — hiçbir XFF header'ı körü körüne kabul edilmez (fail-safe) |
 | `SITE_DOMAIN` | **`edge` servisi için zorunlu** | Hayır | Yalnızca prod | bkz. [HTTPS](#https) |
 
 ### S3 / CloudFront (Formen Aylık Rapor Storage — bkz. [Production Setup Required](#production-setup-required))
@@ -1890,9 +2454,13 @@ uygulama açılır ama "SSO yapılandırması eksik" ekranını gösterir
   uygulanmamıştır; ilgili karşılaştırmaların büyük kısmı zaten
   dashboard, tesis/formen/KPI detay ekranları ve Raporlar'daki "Vardiya
   Karşılaştırma" raporunda mevcuttur.
-- Otomatik CI/CD pipeline'ı tanımlı değildir — **Doğrulanmalı**: dağıtım
-  öncesi test/build adımlarının hangi süreçle (manuel, harici CI) icra
-  edileceği bu depo dışında netleştirilmelidir.
+- Otomatik CI pipeline'ı `.github/workflows/` altında tanımlıdır (bkz.
+  [CI/CD](#cicd)) — backend/frontend lint+test PR'ları bloklayabilir, ancak
+  bu yalnızca GitHub *Branch protection*'da required status check olarak
+  seçilirse geçerlidir (workflow dosyasının kendisi bunu garanti etmez).
+  Gerçek otomatik **deploy** ise bilerek yoktur: `deploy.yml` şu an bir
+  iskelettir (`exit 1` ile durur) — dağıtım öncesi adımların gerçek üretim
+  hedefine karşı nasıl icra edileceği ayrıca netleştirilmelidir.
 - **Tespitler modülü** (bkz. [Tespitler Modülü](#tespitler-modülü-anomali-tespiti--yapay-zekâ-analizi))
   bilinçli olarak Aşama 1 + Aşama 2 kapsamındadır: tespitler sabit
   senaryolardan sentetik olarak üretilir (gerçek bir ML modeli

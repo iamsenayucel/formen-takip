@@ -1,4 +1,4 @@
-"""P0-02 entegrasyon testi DB izolasyonu koruma testleri.
+"""Entegrasyon testi DB izolasyonu koruma testleri.
 
 Entegrasyon testleri normal DATABASE_URL yerine _ephemeral_db.py tarafından hazırlanan
 session-scoped, geçici Postgres container üzerinde çalışmalıdır.
@@ -51,10 +51,7 @@ class TestB_NormalApplicationDatabaseUrlNotUsed:
 @contextmanager
 def _rollback_scope():
     """Yazmaları outer transaction içindeki SAVEPOINT ile sınırlı session döndürür.
-
-    Scope içinde session.commit() çağrılsa bile çıkışta rollback yapılır; test yazmaları
-    sonraki işlemlerden izole edilir.
-    """
+    Scope içinde commit() çağrılsa bile çıkışta rollback yapılır; test yazmaları izole edilir."""
     connection = engine.connect()
     outer_tx = connection.begin()
     session = SessionLocal(bind=connection)

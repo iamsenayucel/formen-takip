@@ -12,8 +12,9 @@ import app.services.anomaly_status_service as anomaly_status_service_module
 import app.services.report_service as report_service_module
 from app.db.session import get_db
 from app.main import app
+from app.models.authorization import UserRoleAssignment, UserScopeAssignment
 from app.models.contribution import ContributionWork
-from app.models.enums import AnomalyStatus
+from app.models.enums import AnomalyStatus, Role, ScopeType
 from app.models.report import ReportExport
 from app.models.user import AuditLog
 from tests.helpers import legacy_json
@@ -77,7 +78,7 @@ class TestContributionCreateAtomicity:
 
         audits = list(db_session.scalars(
             select(AuditLog).where(
-                AuditLog.action == "contribution_work_created", AuditLog.new_value == title
+                AuditLog.action == "operational_impact.created", AuditLog.new_value == title
             )
         ))
         assert len(audits) == 1
@@ -97,7 +98,7 @@ class TestContributionCreateAtomicity:
 
         audit = db_session.scalar(
             select(AuditLog).where(
-                AuditLog.action == "contribution_work_created", AuditLog.new_value == title
+                AuditLog.action == "operational_impact.created", AuditLog.new_value == title
             )
         )
         assert audit is not None
@@ -279,6 +280,17 @@ class _RecordingSession:
     def commit(self):
         self.events.append("commit")
 
+    # get_auth_context (RBAC) bu fake session'ı get_db üzerinden kullanır — bu atomiklik
+    # testleri tam yetkili bir OPERATIONS_MANAGER/ALL scope varsayar, yetkilendirmenin
+    # kendisini değil audit+commit sırasını/atomikliğini test eder.
+    def get(self, model, pk):
+        if model is UserRoleAssignment:
+            return UserRoleAssignment(subject=pk, role=Role.OPERATIONS_MANAGER)
+        return None
+
+    def scalars(self, stmt):
+        return [UserScopeAssignment(subject=TEST_SUBJECT, scope_type=ScopeType.ALL)]
+
 
 @contextmanager
 def _db_override(fake_session):
@@ -313,7 +325,7 @@ class TestReportGenerateAtomicity:
         )
         audit_count = db_session.scalar(
             select(func.count()).select_from(AuditLog).where(
-                AuditLog.action == "report_generated",
+                AuditLog.action == "report.created",
                 AuditLog.entity == "report_export",
                 AuditLog.new_value == cls._FILE_NAME,
             )

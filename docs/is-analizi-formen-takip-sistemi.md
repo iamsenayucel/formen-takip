@@ -111,7 +111,7 @@ Karaman (tek lokasyon)
 |---|---|
 | Backend | FastAPI 0.115 · SQLAlchemy 2.0 (Mapped/mapped_column) · Alembic · Pydantic v2 · Python 3.11 |
 | Veritabanı | PostgreSQL 16 |
-| Kimlik doğrulama | JWT (access + refresh, python-jose), bcrypt parola hash'i |
+| Kimlik doğrulama | Red Hat SSO / Keycloak (OIDC, Authorization Code + PKCE) — bkz. §5.4 |
 | Raporlama | openpyxl (XLSX), reportlab (PDF), stdlib csv |
 | Frontend | React 19 · TypeScript · Vite 8 · TanStack Query v5 · React Router v7 · Tailwind CSS v4 · Recharts 3 |
 | Dağıtım | Docker Compose: `postgres` + `backend` (Uvicorn) + `frontend` (statik build, Nginx) |
@@ -143,11 +143,12 @@ Bu ayrım, iş mantığının (`kpi_engine.py`, `analytics.py`, `target_resolver
 
 ### 5.4 Güvenlik Modeli
 
-- **Kimlik doğrulama:** JWT access (varsayılan 30 dk) + refresh (varsayılan 7 gün) token, bcrypt parola hash'i.
-- **Hesap kilitleme:** `max_failed_login_attempts` (varsayılan 5) aşıldığında hesap `account_lockout_minutes` (varsayılan 15) süreyle kilitlenir (`app/services/auth_service.py`).
-- **Yetkilendirme modeli:** Tüm API uçları (`/auth/*` hariç) `get_current_user` bağımlılığı ile korunur; rol bazlı yetkilendirme (RBAC) **uygulanmamıştır** — sistemdeki tüm kullanıcılar üst yönetim seviyesinde eşit yetkiye sahiptir (tek rol: "Genel Müdür" unvanıyla oluşturulan admin kullanıcıları).
-- **Denetim izi:** Giriş/çıkış, aksiyon planı CRUD, rapor oluşturma/indirme, resync tetikleme gibi eylemler `record_audit()` üzerinden tek noktadan `audit_logs` tablosuna yazılır ve `/audit-log` ekranından görüntülenir.
-- **CORS:** Compose ortamında `http://localhost:5173` ve `http://localhost:8080` ile sınırlıdır; `JWT_SECRET_KEY` varsayılanı (`change-me-in-production`) **production'da mutlaka değiştirilmelidir** — bu depo bunu otomatik zorlamaz.
+- **Kimlik doğrulama:** Yerel kullanıcı adı/şifre veya backend tarafından üretilen bir JWT **yoktur**. Kimlik doğrulama otoritesi Red Hat SSO / Keycloak'tur (OIDC, Authorization Code + PKCE); backend yalnızca SSO'nun imzaladığı access token'ı JWKS/issuer/audience/expiry açısından doğrulayan bir kaynak sunucusudur (`app/core/oidc.py`, `app/api/deps.py::get_current_identity`). Eski yerel JWT (access+refresh)/bcrypt mekanizması ve `app/services/auth_service.py` kod tabanından kaldırılmıştır.
+- **Hesap kilitleme:** Uygulanmaz — hesap yönetimi (parola politikası, başarısız giriş kilidi vb.) tamamen Red Hat SSO/Keycloak tarafında yürütülür.
+- **Yetkilendirme modeli:** Tüm API uçları (health check hariç) doğrulanmış bir OIDC access token ister; rol bazlı yetkilendirme (RBAC) **uygulanmamıştır** — doğrulanmış her kullanıcı aynı yetki seviyesindedir (sistemin tek kullanıcı kitlesi zaten üst yönetimdir, foremen/şefler kullanıcı değildir).
+- **Denetim izi:** Katkı çalışması CRUD, tespit durumu/analiz güncelleme, rapor oluşturma/indirme gibi eylemler `record_audit()` üzerinden tek noktadan `audit_logs` tablosuna yazılır; `subject` alanı OIDC token'ının stabil kimlik claim'idir (ad/e-posta değil, KVKK gereği DB'ye yazılmaz). Giriş/çıkış olayları artık uygulama içinde gerçekleşmediği için Red Hat SSO'nun kendi oturum kayıtlarında izlenir. Bu tabloyu görüntüleyen ayrı bir ekran yoktur.
+- **CORS:** `CORS_ORIGINS` ayarıyla sınırlıdır (Compose'da `http://localhost:5173` ve `http://localhost:8080`).
+- **Development-only bypass:** `ENVIRONMENT=development` + `AUTH_BYPASS=true` iken backend sabit bir demo kimlikle yanıt verir; `ENVIRONMENT=production` bunu ve eksik `OIDC_ISSUER_URL`/`OIDC_AUDIENCE`'ı fail-closed olarak reddeder (`app/core/config.py`).
 
 **IT için doğrulanması gereken açık nokta:** RBAC olmaması, sistemin yalnızca "üst yönetim = tek güven seviyesi" varsayımıyla tasarlandığını gösterir. Genel müdürlük dışında farklı yetki seviyeleri (ör. sadece görüntüleme, bölge bazlı kısıtlama) ileride gerekirse bu, mevcut yetkilendirme modelinde bir mimari değişiklik gerektirir.
 
@@ -552,7 +553,7 @@ Tüm uçlar `/api/v1` altında, JWT bearer token ile korunur (`/auth/*` hariç).
 | Değişken | Varsayılan | Açıklama |
 |---|---|---|
 | `POSTGRES_USER`/`POSTGRES_PASSWORD`/`POSTGRES_DB` | `formen`/`formen`/`formen_takip` | Compose Postgres servisi |
-| `DATABASE_URL` | `postgresql+psycopg://formen:formen@localhost:5432/formen_takip` | Compose'da `postgres:5432` olarak override edilir |
+| `DATABASE_URL` | `postgresql+psycopg://formen:formen@localhost:5433/formen_takip` | Compose'da `postgres:5432` olarak override edilir |
 | `JWT_SECRET_KEY` | `change-me-in-production` | **Production'da mutlaka değiştirilmeli** |
 | `ACCESS_TOKEN_EXPIRE_MINUTES`/`REFRESH_TOKEN_EXPIRE_DAYS` | 30 / 7 | JWT ömürleri |
 | `MAX_FAILED_LOGIN_ATTEMPTS`/`ACCOUNT_LOCKOUT_MINUTES` | 5 / 15 | Hesap kilitleme eşiği/süresi |
@@ -568,4 +569,4 @@ Tüm uçlar `/api/v1` altında, JWT bearer token ile korunur (`/auth/*` hariç).
 
 ---
 
-*Bu rapor, `c:\Users\yucel\Desktop\formen-takip` deposundaki kod tabanının statik incelemesine dayanılarak hazırlanmıştır (backend/app, frontend/src, alembic/versions, README.md, docker-compose.yml). Kodda karşılığı bulunmayan hiçbir yetenek "mevcut" olarak sunulmamıştır; planlanan ama uygulanmamış konular Bölüm 12 ve 15'te açıkça işaretlenmiştir.*
+*Bu rapor, `formen-takip` deposundaki kod tabanının statik incelemesine dayanılarak hazırlanmıştır (backend/app, frontend/src, alembic/versions, README.md, docker-compose.yml). Kodda karşılığı bulunmayan hiçbir yetenek "mevcut" olarak sunulmamıştır; planlanan ama uygulanmamış konular Bölüm 12 ve 15'te açıkça işaretlenmiştir.*

@@ -11,8 +11,10 @@ from enum import Enum
 from typing import Any
 from uuid import UUID
 
-from sqlalchemy import and_, or_
+from sqlalchemy import and_, column, or_, values
 from sqlalchemy.sql.elements import ColumnElement
+from sqlalchemy.sql.selectable import Values
+from sqlalchemy.types import TypeEngine
 
 from app.core.errors import InvalidCursorError
 
@@ -125,28 +127,11 @@ def cursor_envelope(result: dict) -> dict:
     }
 
 
-def paginate_in_memory(
-    items: list[dict], *, id_key: str, cursor: str | None, limit: int,
-    sort_by: str, sort_dir: str, filter_sig: str,
-) -> tuple[list[dict], str | None, bool]:
-    start = 0
-    if cursor is not None:
-        state = decode_cursor(cursor, sort_by=sort_by, sort_dir=sort_dir, filter_sig=filter_sig)
-        for idx, item in enumerate(items):
-            if item[id_key] == state.id:
-                start = idx + 1
-                break
-        else:
-            raise InvalidCursorError("Sayfalama belirteci bu liste için artık geçerli değil.")
-
-    window = items[start : start + limit + 1]
-    has_more = len(window) > limit
-    page_items = window[:limit]
-    next_cursor = None
-    if has_more and page_items:
-        last = page_items[-1]
-        next_cursor = encode_cursor(
-            sort_by=sort_by, sort_dir=sort_dir, filter_sig=filter_sig,
-            sort_value=None, id_=last[id_key],
-        )
-    return page_items, next_cursor, has_more
+def sort_value_source(
+    id_type: TypeEngine, value_type: TypeEngine, values_by_id: dict, *, name: str
+) -> Values | None:
+    if not values_by_id:
+        return None
+    return values(column("id", id_type), column("sort_value", value_type), name=name).data(
+        list(values_by_id.items())
+    )

@@ -216,7 +216,7 @@ def compare_shifts(db: Session, plant: Plant, kpi: Kpi, start: date, end: date) 
     anchor_cache: dict = {}
     per_shift = {s.code: period_average(db, plant, kpi, s, start, end, anchor_cache) for s in shifts}
     # period_average içindeki shift=None yolunun her gün yeniden sorgulaması yerine
-    # yukarıda yüklenen listeyi kullan (bkz. Aşama 4B-2 denetimi).
+    # yukarıda yüklenen listeyi kullan.
     plant_average = period_average(db, plant, kpi, None, start, end, anchor_cache, shifts)
 
     if per_shift:
@@ -529,7 +529,7 @@ def similar_historical_cases(db: Session, exclude_anomaly_id: UUID, kpi: Kpi | N
 
     # Scoring sırasında aday başına ve response mapping sırasında sonuç başına db.get()
     # çağırmak yerine tüm çağrı için tek batch yüklenir. Her adayın fabrikası iki aşamadan
-    # birinde zaten gereklidir (bkz. Aşama 4B-2 denetimi).
+    # birinde zaten gereklidir.
     candidate_plant_ids = {c.plant_id for c in candidates}
     plants_by_id = (
         {p.id: p for p in db.scalars(select(Plant).where(Plant.id.in_(candidate_plant_ids)))}

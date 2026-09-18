@@ -209,7 +209,8 @@ class TestAnomalyListQueryCount:
             assert query_counts[1] == query_counts[5] == query_counts[20], (
                 f"Sorgu sayısı kayıt sayısıyla birlikte büyüyor: {query_counts}"
             )
-            assert query_counts[20] <= 6, f"Beklenenden fazla sorgu: {query_counts[20]}"
+            # +2: RBAC get_auth_context sabit ek yuku (user_role_assignments get + user_scope_assignments select)
+            assert query_counts[20] <= 8, f"Beklenenden fazla sorgu: {query_counts[20]}"
         finally:
             db_session.execute(Anomaly.__table__.delete().where(Anomaly.id.in_([a.id for a in created])))
             db_session.commit()
@@ -220,7 +221,8 @@ class TestAnomalySummaryQueryCount:
         with count_queries() as counter:
             resp = client.get("/api/v1/anomalies/summary", headers=auth_headers)
         assert resp.status_code == 200
-        assert counter["n"] <= 2, f"Summary sorgu sayısı beklenenden fazla: {counter['n']}"
+        # +2: RBAC get_auth_context sabit ek yuku (user_role_assignments get + user_scope_assignments select)
+        assert counter["n"] <= 4, f"Summary sorgu sayısı beklenenden fazla: {counter['n']}"
 
 
 def _make_detail_anomaly(db_session, template: Anomaly, foreman_ids: list[str]) -> Anomaly:
@@ -316,11 +318,9 @@ class TestAnomalyDetailQueryCount:
             assert resp.status_code == 200
             three_foremen_queries = c["n"]
 
-            # Önceden formen başına iki unbatched sorgu vardı: detail helper içindeki foreman_codes
-            # döngüsü ve build_analysis_package; iki ek formen dört sorgu ekliyordu. İlk lookup artık
-            # tek IN(...) sorgusunda batch çalışır. Yalnızca dokunulmayan build_analysis_package
-            # döngüsü yaklaşık formen başına bir sorgu ölçeğinde kalır. Ortamlar arası küçük farklar
-            # testin konusu olmadığından tam delta yerine küçük bir üst sınır doğrulanır.
+            # Detail helper lookup'ı artık tek IN(...) sorgusunda batch çalışır; yalnızca
+            # dokunulmayan build_analysis_package döngüsü formen başına yaklaşık bir sorgu
+            # ekler. Ortam farkları nedeniyle tam delta yerine küçük bir üst sınır doğrulanır.
             growth = three_foremen_queries - one_foreman_queries
             assert 0 <= growth <= 2, (
                 f"1 formen={one_foreman_queries}, 3 formen={three_foremen_queries} (fark={growth}); "
@@ -333,11 +333,8 @@ class TestAnomalyDetailQueryCount:
 
 @contextmanager
 def count_matching_queries(substrings: tuple[str, ...]):
-    """Tüm substring'leri içeren statement'ları sayar.
-
-    Belirli query ailesini request içindeki diğer sorgulardan ayırmak için count_queries()
-    fonksiyonundan daha dar çalışır.
-    """
+    """Tüm substring'leri içeren statement'ları sayar; belirli query ailesini diğer
+    sorgulardan ayırmak için count_queries()'den daha dar çalışır."""
     counter = {"n": 0}
 
     def _on_execute(conn, cursor, statement, parameters, context, executemany):
@@ -352,11 +349,10 @@ def count_matching_queries(substrings: tuple[str, ...]):
 
 
 class TestInvestigationActiveShiftQueryCount:
-    """4B-2A1 regresyonu: compare_factories active-shift listesini eskiden her gün x fabrika
-    için yeniden yüklüyordu. Artık request başına bir kez yükler. compare_shifts içindeki
-    period_days x 1 maliyeti burada bilerek korunur; 21 ve 14 günlük anomaliler arasındaki
-    fark gün sayısını izlemeli, fabrika sayısıyla çarpılmamalıdır.
-    """
+    """compare_factories active-shift listesini eskiden her gün × fabrika için yeniden
+    yüklüyordu, artık request başına bir kez yükler. compare_shifts içindeki period_days×1
+    maliyeti bilerek korunur; 21 ve 14 günlük anomaliler arasındaki fark gün sayısını
+    izlemeli, fabrika sayısıyla çarpılmamalı."""
 
     def test_active_shift_query_count_no_longer_scales_with_plant_count(self, client, auth_headers, db_session):
         a21 = db_session.scalar(select(Anomaly).where(Anomaly.code == "ANM-2026-0001"))
@@ -378,10 +374,10 @@ class TestInvestigationActiveShiftQueryCount:
         assert resp.status_code == 200
         shift_queries_14 = c14["n"]
 
-        # Önceden yaklaşık period_days * (active_plants + 1) sorgu vardı: 21*51=1071 ve
-        # 14*51=714, fark yaklaşık 357 idi. Artık yalnızca compare_shifts içindeki dokunulmayan
-        # period_days*1 kalır; fark fabrika sayısıyla çarpılmak yerine gün farkını (7) ve küçük
-        # sabit maliyeti izlemelidir.
+        # Önceden yaklaşık period_days * (active_plants + 1) sorgu vardı (21×51=1071,
+        # 14×51=714, fark ≈357). Artık yalnızca compare_shifts'in period_days×1 kalıntısı
+        # kalır; fark fabrika sayısıyla değil gün farkıyla (7) ve küçük bir sabit maliyetle
+        # sınırlı olmalı.
         day_delta = period_21 - period_14
         diff = abs(shift_queries_21 - shift_queries_14)
         assert diff <= day_delta + 5, (
@@ -394,10 +390,9 @@ class TestInvestigationActiveShiftQueryCount:
         assert shift_queries_14 <= 60, f"Active-shift sorgu sayısı beklenenden çok fazla: {shift_queries_14}"
 
     def test_shift_query_count_does_not_scale_with_period_days_at_all(self, client, auth_headers, db_session):
-        """4B-2A2: compare_shifts plant_average düzeltmesinden sonra active-shift query sayısı
-        period_days ile büyümemelidir. 21 ve 14 günlük anomaliler arasında yalnızca bir kerelik
-        setup fetch'leri fark edebilir.
-        """
+        """compare_shifts plant_average düzeltmesinden sonra active-shift query sayısı
+        period_days ile büyümemeli. 21 ve 14 günlük anomaliler arasında yalnızca bir kerelik
+        setup fetch'leri fark edebilir."""
         a21 = db_session.scalar(select(Anomaly).where(Anomaly.code == "ANM-2026-0001"))
         a14 = db_session.scalar(select(Anomaly).where(Anomaly.code == "ANM-2026-0009"))
         assert a21 is not None and a14 is not None, "Testler için önce 'python -m app.cli seed-anomalies' çalıştırılmalı."
@@ -423,10 +418,9 @@ class TestInvestigationActiveShiftQueryCount:
 
 
 class TestSimilarHistoricalCasesQueryCount:
-    """4B-2C regresyonu: similar_historical_cases içindeki Plant/Kpi lookup sorgularının
-    aday sayısıyla büyümemesini doğrular. HTTP katmanından bağımsız scoring adayları üretir
-    ve finally içinde temizler.
-    """
+    """similar_historical_cases içindeki Plant/Kpi lookup sorgularının aday sayısıyla
+    büyümemesini doğrular. HTTP katmanından bağımsız scoring adayları üretir ve finally
+    içinde temizler."""
 
     def _make_candidate(self, db_session, *, code, plant_id, kpi_id, detected_at):
         a = Anomaly(

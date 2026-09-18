@@ -57,8 +57,15 @@ export const KPI_SCORE_STATUS_STYLES: Record<KpiScoreStatus, { background: strin
 
 // KPI adları backend'de "... Oranı" gibi metrik isimleri olarak tutulur; kart
 // başlığında tutarlı biçimde "... Puanı" olarak göstermek için tek merkezi kural.
+//
+// Regex /i case-insensitivity ASCII case-folding kurallarını kullanır ve
+// Türkçe noktasız "ı"yı ASCII "I" ile eşleştirmez (örn. tamamı büyük harf bir
+// isim regex /oranı$/i ile eşleşmezdi). toLocaleLowerCase("tr-TR") Türkçe
+// harf eşleme kurallarını (I/İ -> ı/i) doğru uygular, bu yüzden suffix
+// kontrolü regex yerine locale-aware lowercase üzerinden yapılır.
 export function kpiScoreCardTitle(name: string): string {
-  if (/oranı$/i.test(name)) return name.replace(/oranı$/i, "Puanı");
-  if (/puan(ı)?$/i.test(name)) return name;
+  const normalized = name.toLocaleLowerCase("tr-TR");
+  if (normalized.endsWith("oranı")) return `${name.slice(0, name.length - "oranı".length)}Puanı`;
+  if (normalized.endsWith("puanı") || normalized.endsWith("puan")) return name;
   return `${name} Puanı`;
 }

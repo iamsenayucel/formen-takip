@@ -5,7 +5,7 @@ import { useAuth } from "../context/AuthContext";
 import { useTheme } from "../context/ThemeContext";
 
 // Red Hat SSO'ya ulaşılamadığı veya callback hata döndürdüğü durumlarda otomatik
-// yönlendirmenin sonsuz döngüye girmesini engeller (bkz. görev md. 19).
+// yönlendirmenin sonsuz döngüye girmesini engeller.
 const REDIRECT_GUARD_KEY = "formen_sso_redirect_attempted";
 
 export function LoginPage() {
@@ -53,7 +53,9 @@ export function LoginPage() {
       >
         <div />
         <div className="flex flex-col items-center text-center">
-          <img src="/logo.png" alt="CORVUS Logo" className="w-full max-w-md" />
+          <div className="rounded-lg p-4" style={{ background: "#ffffff" }}>
+            <img src="/logo.png" alt="CORVUS Logo" className="w-full max-w-md" />
+          </div>
           <h1 className="mt-6 max-w-md text-2xl font-semibold leading-snug" style={{ color: "var(--sidebar-heading)" }}>
             Üretim Performans Yönetim Sistemi
           </h1>
@@ -68,7 +70,9 @@ export function LoginPage() {
       <div className="flex flex-1 items-center justify-center px-6">
         <div className="w-full max-w-sm">
           <div className="mb-8 flex justify-center lg:hidden">
-            <img src="/logo.png" alt="CORVUS Logo" className="h-auto w-40" />
+            <div className="rounded-lg p-2" style={{ background: "#ffffff" }}>
+              <img src="/logo.png" alt="CORVUS Logo" className="h-auto w-40" />
+            </div>
           </div>
 
           <div className="rounded-lg p-6 text-center" style={{ background: "var(--surface)", border: "1px solid var(--border)" }}>

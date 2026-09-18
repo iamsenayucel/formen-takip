@@ -6,8 +6,22 @@
   "scripts": {
     "dev": "vite",
     "build": "tsc -b && vite build",
+    "typecheck": "tsc -b && tsc -p tsconfig.vitest.json --noEmit",
     "lint": "oxlint",
-    "preview": "vite preview"
+    "preview": "vite preview",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "test:coverage": "vitest run --coverage",
+    "smoke": "playwright test",
+    "smoke:headed": "playwright test --headed",
+    "smoke:debug": "playwright test --debug",
+    "test:e2e": "playwright test",
+    "smoke:manual:rbac": "node scripts/manual/smoke_test_rbac.mjs",
+    "smoke:manual:tool-calling": "node scripts/manual/smoke_test_tool_calling.mjs",
+    "smoke:manual:monthly-report": "node scripts/manual/smoke_test_monthly_report.mjs",
+    "smoke:manual:shift-heatmap": "node scripts/manual/smoke_test_shift_heatmap_and_matrix.mjs",
+    "smoke:manual:responsive": "node scripts/manual/responsive_audit.mjs",
+    "smoke:manual:responsive-pages": "node scripts/manual/responsive_audit_other_pages.mjs"
   },
   "dependencies": {
     "@tanstack/react-query": "^5.101.4",
@@ -23,15 +37,23 @@
     "recharts": "^3.10.1"
   },
   "devDependencies": {
+    "@playwright/test": "^1.62.0",
     "@tailwindcss/vite": "^4.3.3",
+    "@testing-library/jest-dom": "^7.0.1",
+    "@testing-library/react": "^16.3.3",
+    "@testing-library/user-event": "^14.6.7",
     "@types/node": "^24.13.2",
     "@types/react": "^19.2.17",
     "@types/react-dom": "^19.2.3",
     "@vitejs/plugin-react": "^6.0.3",
+    "@vitest/coverage-v8": "^5.0.1",
+    "jsdom": "^27.4.0",
+    "msw": "^2.15.0",
     "oxlint": "^1.71.0",
     "playwright": "^1.62.0",
     "tailwindcss": "^4.3.3",
     "typescript": "~6.0.2",
-    "vite": "^8.1.1"
+    "vite": "^8.1.1",
+    "vitest": "^5.0.1"
   }
 }

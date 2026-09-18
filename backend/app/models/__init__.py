@@ -1,4 +1,5 @@
 from app.models.anomaly import Anomaly, AnomalyAnalysis, AnomalyToolCall
+from app.models.authorization import UserRoleAssignment, UserScopeAssignment
 from app.models.contribution import ContributionGain, ContributionWork, ContributionWorkForeman, ContributionWorkPlant
 from app.models.enums import (
     AggregationMethod,
@@ -25,6 +26,8 @@ from app.models.enums import (
     ReportStatus,
     ReportStorageProvider,
     ReportType,
+    Role,
+    ScopeType,
     SourceSystem,
     TargetScopeType,
     TimeUnit,
@@ -102,4 +105,8 @@ __all__ = [
     "AnomalySeverity",
     "AnomalyStatus",
     "AnomalyType",
+    "UserRoleAssignment",
+    "UserScopeAssignment",
+    "Role",
+    "ScopeType",
 ]

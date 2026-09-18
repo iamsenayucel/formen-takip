@@ -1,0 +1,62 @@
+name: frontend-ci
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+  workflow_dispatch: {}
+
+# Yeni bir push aynı PR/branch için eskisini iptal eder (bkz. backend-ci.yml'deki
+# aynı desen).
+concurrency:
+  group: frontend-ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  lint-and-build:
+    name: lint + typecheck + test + build (frontend)
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: frontend
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: "24"
+          cache: "npm"
+          cache-dependency-path: frontend/package-lock.json
+      - name: Install dependencies
+        run: npm ci
+      - name: Lint (oxlint)
+        run: npm run lint
+      - name: Typecheck (tsc -b, app + test project)
+        run: npm run typecheck
+      - name: Unit + component + page-integration tests (Vitest)
+        run: npm run test
+      - name: Build (tsc -b && vite build)
+        run: npm run build
+
+  # Playwright kritik-yol smoke suite'i (frontend/scripts/smoke/*.spec.ts) bilerek bu
+  # workflow'a bağlanmadı: gerçekçi bir çalıştırma postgres+backend+frontend'i
+  # AUTH_BYPASS=true ile ayağa kaldırıp seed etmeyi gerektiriyor (bkz. README
+  # "Playwright Smoke Testleri" önkoşulları) — bu, mevcut backend-ci.yml'nin
+  # Testcontainers deseninden daha ağır, çok-servisli bir CI adımı olurdu ve bu
+  # PR'ın kapsamı dışında bırakıldı. Yerelde `npm run smoke` ile çalıştırılır.
+  #
+  # Önerilen (henüz uygulanmadı) ayrı job — `e2e-smoke`, bu job'ı PR-blocking
+  # yapmadan önce stabilize etmek için:
+  #   on: workflow_dispatch, push (main), schedule (nightly), ve
+  #     paths-filter ile yalnızca frontend/backend değiştiğinde.
+  #   services/steps: `docker compose -f docker-compose.yml -f docker-compose.db.yml
+  #     up --build -d` (ENVIRONMENT=development, AUTH_BYPASS=true, VITE_AUTH_BYPASS=true)
+  #     -> `docker compose exec backend python -m app.cli seed --seed 42` (deterministik
+  #     seed) -> `curl --retry ... http://localhost:8000/health/ready` -> `npx playwright
+  #     install --with-deps chromium` -> `npm run smoke`.
+  #   failure artifacts: yalnızca başarısız test için trace + screenshot (`actions/upload-artifact`,
+  #     `if: failure()`) — video her koşuda tutulmaz (storage maliyeti).
+  # Suite stabil çalıştığı görüldükten sonra `pull_request` tetikleyicisine ve PR-blocking
+  # durumuna terfi etmesi değerlendirilebilir.

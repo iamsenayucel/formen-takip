@@ -13,9 +13,10 @@ interface Props {
   selected: SelectedForeman[];
   onChange: (selected: SelectedForeman[]) => void;
   disabled?: boolean;
+  id?: string;
 }
 
-export function ForemanMultiSelect({ selected, onChange, disabled }: Props) {
+export function ForemanMultiSelect({ selected, onChange, disabled, id }: Props) {
   const [open, setOpen] = useState(false);
   const [query, setQuery] = useState("");
   const close = () => setOpen(false);
@@ -57,6 +58,7 @@ export function ForemanMultiSelect({ selected, onChange, disabled }: Props) {
       )}
 
       <button
+        id={id}
         ref={triggerRef}
         type="button"
         disabled={disabled}

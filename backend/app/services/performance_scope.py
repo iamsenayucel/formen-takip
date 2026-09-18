@@ -15,7 +15,12 @@ class ForemanPerformanceScope:
 
 
 def resolve_foreman_scope(filters: Filters, primary_plant_id: UUID | None) -> ForemanPerformanceScope:
-    plant_ids = filters.plant_ids or ([primary_plant_id] if primary_plant_id else None)
+    # `filters.plant_ids == []` (authorization scope narrowed the request to zero plants)
+    # kasıtlı olarak fallback'e düşürülmez — aksi halde scope dışı primary_plant_id sızar.
+    # Sadece filtre hiç verilmemişse (`None`) primary_plant_id'ye düşülür.
+    plant_ids = filters.plant_ids if filters.plant_ids is not None else (
+        [primary_plant_id] if primary_plant_id else None
+    )
     return ForemanPerformanceScope(
         operational=filters,
         plant=replace(filters, plant_ids=plant_ids),

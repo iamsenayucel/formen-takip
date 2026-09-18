@@ -29,6 +29,11 @@ class UnauthorizedError(ApiException):
     code = "UNAUTHORIZED"
 
 
+class ForbiddenError(ApiException):
+    status_code = 403
+    code = "FORBIDDEN"
+
+
 class NotFoundError(ApiException):
     status_code = 404
     code = "RESOURCE_NOT_FOUND"

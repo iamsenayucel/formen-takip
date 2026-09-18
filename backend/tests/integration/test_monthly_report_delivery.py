@@ -153,11 +153,9 @@ class TestMonthlyReportAccessEndpoint:
 
 
 class TestPdfVsAccessErrorPolicyDivergence:
-    """Aşama 3F — pdf ve access uç noktalarının `generate_and_store_report_pdf`
-    başarısızlığına KASITLI OLARAK farklı tepki verdiğini kilitler: pdf sessizce
-    on-the-fly render'a düşer (200 döner), access ise 502 fırlatır. Refactor
-    sırasında bu iki davranışın yanlışlıkla aynılaştırılmadığını doğrular.
-    """
+    """pdf ve access uç noktalarının `generate_and_store_report_pdf` başarısızlığına
+    KASITLI OLARAK farklı tepki verdiğini kilitler: pdf sessizce on-the-fly render'a
+    düşer (200 döner), access ise 502 fırlatır."""
 
     def test_pdf_endpoint_falls_back_silently_on_storage_failure(self, client, auth_headers, report_row):
         with patch(
@@ -185,12 +183,10 @@ class TestPdfVsAccessErrorPolicyDivergence:
 
 
 class TestMonthlyReportAuditIsSeparatePhase:
-    """Aşama 3F — rapor state machine'i (Faz 1, `monthly_foreman_report.py`'nin kendi
-    commit'i) ile audit (Faz 2, ayrı commit) arasındaki iki-fazlı transaction ayrımını
-    kilitler: audit kaydı başarısız olsa bile, zaten önceden commit edilmiş rapor
-    üretim/storage durumu (READY, object_key) geri alınmaz ve audit satırı hiç
-    oluşmaz. Bu, tek bir mega-transaction'a birleştirilmediğinin kanıtıdır.
-    """
+    """Rapor state machine'i (Faz 1, `monthly_foreman_report.py`'nin kendi commit'i) ile
+    audit (Faz 2, ayrı commit) arasındaki iki-fazlı transaction ayrımını kilitler: audit
+    kaydı başarısız olsa bile, önceden commit edilmiş rapor üretim/storage durumu (READY,
+    object_key) geri alınmaz ve audit satırı hiç oluşmaz."""
 
     def test_audit_failure_does_not_roll_back_already_committed_report_state(
         self, unraising_client, auth_headers, db_session, report_row, monkeypatch

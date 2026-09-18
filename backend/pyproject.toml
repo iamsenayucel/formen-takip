@@ -1,0 +1,19 @@
+[tool.ruff]
+target-version = "py311"
+line-length = 120
+
+[tool.ruff.lint]
+# Dar kapsamlı, yüksek-güven kural seti: yalnızca gerçek hata sınıflarını yakalar
+# (syntax hatası, tanımsız isim, geçersiz karşılaştırma/yüzde formatı). Repo'nun
+# stil/format kuralları henüz standardize edilmedi (bkz. backend-ci.yml lint job
+# yorumu) — geniş ruleset (E/W/I/UP/...) mevcut ~460 pre-existing bulgu nedeniyle
+# CI'ı kullanılamaz hale getirir, bu yüzden kapsam bilinçli olarak dar tutuldu.
+select = ["E9", "F63", "F7", "F821", "F822"]
+
+[tool.ruff.lint.per-file-ignores]
+# SQLAlchemy 2.0 Mapped[...] ilişkileri, dairesel import'u önlemek için hedef
+# sınıfı stringle (ör. Mapped[list["Plant"]]) referanslar; gerçek çözümleme
+# SQLAlchemy mapper registry'si üzerinden runtime'da olur, statik olarak
+# tanımsız görünür. İki dosyaya özgü, doğrulanmış false-positive.
+"app/models/foreman.py" = ["F821"]
+"app/models/organization.py" = ["F821"]

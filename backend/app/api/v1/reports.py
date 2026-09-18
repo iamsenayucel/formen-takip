@@ -3,12 +3,14 @@ from uuid import UUID
 from fastapi import APIRouter, Depends, Request, Response
 from sqlalchemy.orm import Session
 
-from app.api.deps import get_current_identity
+from app.api.authz_deps import require_permission
+from app.core.client_ip import get_client_ip
 from app.core.pagination import cursor_envelope
+from app.core.permissions import Permission
 from app.core.rate_limit import rate_limit_report
 from app.db.session import get_db
 from app.models.enums import ReportFormat
-from app.schemas.auth import Identity
+from app.schemas.authz import AuthContext
 from app.schemas.base import ApiResponse, CursorResponse
 from app.schemas.common import CursorParams, cursor_params
 from app.schemas.report import ReportExportMeta, ReportGenerateRequest
@@ -22,16 +24,24 @@ _CONTENT_TYPES = {
     ReportFormat.PDF: "application/pdf",
 }
 
+_require_create = require_permission(Permission.REPORTS_CREATE)
+_require_download = require_permission(Permission.REPORTS_DOWNLOAD)
+_require_outputs = require_permission(Permission.OUTPUTS_VIEW)
+
+
+def _scope_plant_ids(ctx: AuthContext) -> list[UUID] | None:
+    return sorted(ctx.plant_ids, key=str) if ctx.plant_ids is not None else None
+
 
 @router.post("/generate", status_code=201, response_model=ApiResponse[ReportExportMeta], dependencies=[Depends(rate_limit_report)])
 def generate_report(
     payload: ReportGenerateRequest,
     request: Request,
     db: Session = Depends(get_db),
-    current_user: Identity = Depends(get_current_identity),
+    ctx: AuthContext = Depends(_require_create),
 ) -> ApiResponse[ReportExportMeta]:
     data = ReportService(db).generate_report(
-        payload, current_user.subject, request.client.host if request.client else None,
+        payload, ctx.subject, get_client_ip(request), plant_ids_scope=_scope_plant_ids(ctx),
     )
     return {"data": data}
 
@@ -40,9 +50,10 @@ def generate_report(
 def list_reports(
     page: CursorParams = Depends(cursor_params),
     db: Session = Depends(get_db),
-    _=Depends(get_current_identity),
+    ctx: AuthContext = Depends(_require_outputs),
 ) -> CursorResponse[ReportExportMeta]:
-    result = ReportService(db).list_reports(page)
+    requested_by = ctx.subject if ctx.plant_ids is not None else None
+    result = ReportService(db).list_reports(page, requested_by_subject=requested_by)
     return cursor_envelope(result)
 
 
@@ -51,10 +62,10 @@ def download_report(
     report_id: UUID,
     request: Request,
     db: Session = Depends(get_db),
-    current_user: Identity = Depends(get_current_identity),
+    ctx: AuthContext = Depends(_require_download),
 ) -> Response:
     export = ReportService(db).download_report(
-        report_id, current_user.subject, request.client.host if request.client else None,
+        report_id, ctx.subject, get_client_ip(request), plant_ids_scope=_scope_plant_ids(ctx),
     )
 
     return Response(

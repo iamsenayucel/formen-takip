@@ -3,10 +3,27 @@ x-backend-env: &backend-env
   # Local fallback POSTGRES_* ile Compose'taki postgres servisine bağlanır.
   # Harici DB kullanan deployment DATABASE_URL değerini doğrudan vermelidir.
   DATABASE_URL: ${DATABASE_URL:-postgresql+psycopg://${POSTGRES_USER:-formen}:${POSTGRES_PASSWORD:-formen}@postgres:5432/${POSTGRES_DB:-formen_takip}}
+  # SQLAlchemy connection pool (bkz. app/core/config.py, app/db/session.py). Varsayılanlar
+  # SQLAlchemy'nin kendi varsayılanlarıyla aynıdır — "production optimum değer" iddiası
+  # değildir. PostgreSQL max_connections, worker/process sayısı ve scheduler bağlantılarıyla
+  # birlikte ayrıca doğrulanmadan production'da büyütülmemelidir (bkz. README "DB Connection Pool").
+  DB_POOL_SIZE: ${DB_POOL_SIZE:-5}
+  DB_MAX_OVERFLOW: ${DB_MAX_OVERFLOW:-10}
+  DB_POOL_TIMEOUT: ${DB_POOL_TIMEOUT:-30}
+  DB_POOL_RECYCLE: ${DB_POOL_RECYCLE:-1800}
   CORS_ORIGINS: ${CORS_ORIGINS:-["http://localhost:5173","http://localhost:8080"]}
+  # frontend (nginx) backend'e her zaman bu Compose ağı üzerinden bağlanır; subnet
+  # aşağıdaki networks.default.ipam ile sabitlenir. Frontend/backend ayrı host'taysa
+  # (bkz. docker-compose.prod.yml yorumları) bu değer gerçek frontend/edge private ağ
+  # CIDR'ına göre override edilmelidir — aksi halde audit log'a gerçek istemci IP'si
+  # yerine frontend'in IP'si yazılmaya devam eder (fail-safe: hiçbir XFF header'ı
+  # kör güvenle kabul edilmez).
+  TRUSTED_PROXY_IPS: ${TRUSTED_PROXY_IPS:-172.28.5.0/24}
   ENVIRONMENT: ${ENVIRONMENT:-production}
   # APP_DEBUG, host'taki genel DEBUG değişkenleriyle çakışmayı önler.
   DEBUG: ${APP_DEBUG:-false}
+  # Root logger ve app.* logger'larının minimum seviyesi (bkz. README "Logging").
+  LOG_LEVEL: ${LOG_LEVEL:-INFO}
   # AUTH_BYPASS yalnız development ortamında açılabilir; Settings diğer ortamları reddeder.
   AUTH_BYPASS: ${AUTH_BYPASS:-false}
   # Red Hat SSO / Keycloak (OIDC) — backend yalnızca kaynak sunucudur (resource
@@ -119,3 +136,13 @@ services:
       # Ayrı host erişimi gerekiyorsa FRONTEND_BIND private ağ adresi olmalı; 0.0.0.0 kullanmayın.
       # Non-root Nginx container içinde 8080 portunu dinler.
       - "${FRONTEND_BIND:-127.0.0.1}:8080:8080"
+
+# Varsayılan Compose ağının subnet'i sabitlenir: Docker'ın otomatik seçtiği subnet
+# host/deployment'a göre değişebilir, ama backend'in TRUSTED_PROXY_IPS varsayılanı
+# (yukarıdaki x-backend-env) bu subnet'e göre yazılmıştır — sabitlenmezse audit log
+# IP çözümlemesi öngörülemez biçimde bozulabilir (bkz. app/core/client_ip.py).
+networks:
+  default:
+    ipam:
+      config:
+        - subnet: 172.28.5.0/24

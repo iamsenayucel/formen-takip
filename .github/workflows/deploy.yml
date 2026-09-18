@@ -1,0 +1,62 @@
+name: deploy
+
+# GERÇEK BİR DEPLOY HEDEFİ (host/SSH/registry credential/hedef ortam) bu görev
+# kapsamında verilmedi — bu yüzden bu workflow hiçbir otomatik/varsayılan
+# deploy YAPMAZ. Yalnızca elle (workflow_dispatch) tetiklenir ve gerekli
+# secret'lar (DEPLOY_SSH_HOST / DEPLOY_SSH_USER / DEPLOY_SSH_KEY) tanımlı
+# değilse ilk adımda açıkça ve güvenli şekilde fail eder — sahte/varsayılan bir
+# hedefe bağlanmayı DENEMEZ. Secret'lar `production` GitHub Environment'ına
+# eklendiğinde bu iskelet gerçek bir deploy adımına dönüştürülebilir (bkz.
+# README "Production Deployment" / "CI/CD").
+on:
+  workflow_dispatch:
+    inputs:
+      image_tag:
+        description: "GHCR'den deploy edilecek image tag'i (bkz. docker-build.yml çıktısı, ör. bir commit SHA)"
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+jobs:
+  check-config:
+    name: Deploy secrets kontrolü
+    runs-on: ubuntu-latest
+    environment: production
+    outputs:
+      configured: ${{ steps.check.outputs.configured }}
+    steps:
+      - name: Gerekli secret'ların varlığını doğrula
+        id: check
+        env:
+          HAS_HOST: ${{ secrets.DEPLOY_SSH_HOST != '' }}
+          HAS_USER: ${{ secrets.DEPLOY_SSH_USER != '' }}
+          HAS_KEY: ${{ secrets.DEPLOY_SSH_KEY != '' }}
+        run: |
+          if [ "$HAS_HOST" != "true" ] || [ "$HAS_USER" != "true" ] || [ "$HAS_KEY" != "true" ]; then
+            echo "::error::Deploy secrets eksik (DEPLOY_SSH_HOST / DEPLOY_SSH_USER / DEPLOY_SSH_KEY). Bu repo için gerçek bir production deploy hedefi henüz tanımlanmadı — bkz. README 'CI/CD'. 'production' GitHub Environment'ına bu secret'lar eklenmeden deploy çalışmaz."
+            echo "configured=false" >> "$GITHUB_OUTPUT"
+            exit 1
+          fi
+          echo "configured=true" >> "$GITHUB_OUTPUT"
+
+  deploy:
+    name: Deploy (${{ inputs.image_tag }})
+    needs: check-config
+    if: needs.check-config.outputs.configured == 'true'
+    runs-on: ubuntu-latest
+    environment: production
+    steps:
+      # Aşağıdaki adımlar bir İSKELETTİR, gerçek bir sunucuya karşı doğrulanmadı.
+      # Somut hedef (tek sunucu / ayrı sunucu / external DB) README'deki
+      # "Production Deployment" modellerinden hangisiyse ona göre uyarlanmalı;
+      # burada yalnızca en genel SSH + `docker compose pull && up -d` deseni
+      # yer tutucu olarak bırakıldı.
+      - name: Placeholder — SSH ile image tag'ini deploy et
+        env:
+          DEPLOY_SSH_HOST: ${{ secrets.DEPLOY_SSH_HOST }}
+          DEPLOY_SSH_USER: ${{ secrets.DEPLOY_SSH_USER }}
+        run: |
+          echo "::notice::Bu adım gerçek bir deploy yapmaz — DEPLOY_SSH_HOST=${DEPLOY_SSH_HOST} / DEPLOY_SSH_USER=${DEPLOY_SSH_USER} secret'ları tanımlı, ama SSH komutu (docker compose -f docker-compose.yml -f docker-compose.prod.yml pull && up -d) bu iskelette bilinçli olarak yer almıyor. Gerçek deploy adımını eklemeden önce hedef sunucu/host anahtarı doğrulaması (known_hosts) ve rollback planı README'ye yazılmalı."
+          exit 1

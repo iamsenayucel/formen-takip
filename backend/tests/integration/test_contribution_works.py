@@ -321,8 +321,6 @@ class TestContributionWorkCreate:
 
 
 class TestContributionWorkTypes:
-    """5S / Çeşit Dönüşü Verimliliği / Personel Tasarrufu / Müşteri Şikayet / Poke Yoke."""
-
     @pytest.mark.parametrize(
         "work_type,expected_label",
         [

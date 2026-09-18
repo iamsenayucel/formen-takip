@@ -19,6 +19,7 @@ from app.models.organization import Factory, Plant, Shift
 class AnomalyListQueryParams:
     factory: str | None = None
     plant_id: UUID | None = None
+    plant_ids: list[UUID] | None = None
     shift_id: UUID | None = None
     kpi_id: UUID | None = None
     severity: AnomalySeverity | None = None
@@ -53,6 +54,8 @@ class AnomalyRepository:
             )
         if params.plant_id:
             query = query.where(Anomaly.plant_id == params.plant_id)
+        if params.plant_ids is not None:
+            query = query.where(Anomaly.plant_id.in_(params.plant_ids))
         if params.shift_id:
             query = query.where(Anomaly.shift_id == params.shift_id)
         if params.kpi_id:
@@ -169,7 +172,13 @@ class AnomalyRepository:
         not_analyzed_status: AnomalyAnalysisStatus,
         week_ago: datetime,
         resolved_statuses: tuple[AnomalyStatus, ...],
+        plant_ids: list[UUID] | None = None,
     ) -> dict:
+        base = select(Anomaly.id)
+        if plant_ids is not None:
+            base = base.where(Anomaly.plant_id.in_(plant_ids))
+        scoped = base.subquery()
+
         row = self.db.execute(
             select(
                 func.count().filter(Anomaly.status.in_(active_statuses)).label("total_active"),
@@ -178,6 +187,6 @@ class AnomalyRepository:
                 func.count().filter(Anomaly.analysis_status == not_analyzed_status).label("pending_analysis_count"),
                 func.count().filter(Anomaly.detected_at >= week_ago).label("opened_last_7_days"),
                 func.count().filter(Anomaly.status.in_(resolved_statuses)).label("resolved_count"),
-            )
+            ).where(Anomaly.id.in_(select(scoped.c.id)))
         ).one()
         return dict(row._mapping)

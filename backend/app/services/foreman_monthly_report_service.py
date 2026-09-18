@@ -34,14 +34,10 @@ RecordAudit = Callable[..., object]
 class ForemanMonthlyReportService:
     """Foreman aylık performans raporu (Monthly Reports) HTTP orkestrasyonu.
 
-    Rapor üretimi/storage durumu tamamen `monthly_foreman_report.py`'nin
-    sorumluluğunda kalır — kendi idempotency/race-recovery/çoklu-commit state
-    machine'i buradan hiç çağrılmadan, değiştirilmeden kullanılır. Bu servis
-    yalnızca HTTP orkestrasyonunu ve pdf/access uç noktalarındaki audit'in AYRI
-    ikinci fazını (rapor state machine'i kendi commit'ini tamamladıktan sonra
-    flush→audit→commit) yönetir — Aşama 2'nin "mutation→flush→audit→commit"
-    deseninin, "mutation" kısmı zaten başka bir modül tarafından commit edilmiş
-    durumda olduğu için hafifletilmiş bir varyantı.
+    Rapor üretimi/storage state machine'i tamamen `monthly_foreman_report.py`'de
+    kalır, burada değiştirilmez. Bu servis yalnızca HTTP orkestrasyonunu ve
+    pdf/access uç noktalarındaki audit'in ayrı ikinci fazını (state machine kendi
+    commit'ini tamamladıktan sonra flush→audit→commit) yönetir.
     """
 
     def __init__(self, db: Session):

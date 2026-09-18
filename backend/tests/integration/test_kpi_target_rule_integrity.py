@@ -261,11 +261,9 @@ class TestPublishTransaction:
 
 
 class TestPublishTransactionRollback:
-    """Yeni publish penceresiyle çakışan kapalı legacy satırı simüle eder.
-
-    Satır open-ended olmadığından FOR UPDATE ile kapatılamaz ve INSERT exclusion constraint'e
-    takılır. Transaction temiz rollback olmalı; kısmi satır bırakmamalı ve mevcut veriye dokunmamalıdır.
-    """
+    """Yeni publish penceresiyle çakışan kapalı legacy satırı simüle eder. Satır open-ended
+    olmadığından FOR UPDATE ile kapatılamaz, INSERT exclusion constraint'e takılır.
+    Transaction temiz rollback olmalı; kısmi satır bırakmamalı."""
 
     def test_conflicting_publish_rolls_back_and_leaves_previous_untouched(self, temp_kpi):
         db = SessionLocal()
@@ -329,11 +327,9 @@ class TestPublishTransactionRollback:
 class TestConcurrentPublish:
     def test_two_concurrent_publishes_never_leave_more_than_one_open_target(self, temp_kpi):
         """İki thread aynı kpi/scope için open-ended hedef publish etmeye yarışır.
-
-        with_for_update ortak durumu serialize eder; kaybeden thread yine ikinci çakışan satırı
-        eklemeyi deneyebilir. Son yarışı EXCLUDE constraint yakalar. İki çağrının da başarısı
-        değil, DB'de birden fazla açık/çakışan satır kalmaması test edilir.
-        """
+        with_for_update ortak durumu serialize eder; kaybeden thread ikinci çakışan satırı
+        eklemeyi deneyebilir, son yarışı EXCLUDE constraint yakalar. İki çağrının başarısı
+        değil, DB'de birden fazla açık/çakışan satır kalmaması test edilir."""
         seed_db = SessionLocal()
         try:
             publish_target(

@@ -14,7 +14,7 @@ import {
 } from "lucide-react";
 import type { AnomalyAnalysisStatus, AnomalySeverity, AnomalyStatus } from "../api/types";
 
-// Not: renkler Badge'in `${color}NN` hex-alfa birleştirmesiyle (bg/border
+// Renkler Badge'in `${color}NN` hex-alfa birleştirmesiyle (bg/border
 // opaklığı) kullanıldığından literal hex olmalı — CSS custom property burada
 // geçerli değil. Değerler RENK SEMANTİĞİ'ndeki merkezi status paletiyle eşleşir.
 export const SEVERITY_CONFIG: Record<AnomalySeverity, { label: string; color: string; icon: typeof Info }> = {
@@ -24,7 +24,7 @@ export const SEVERITY_CONFIG: Record<AnomalySeverity, { label: string; color: st
   critical: { label: "Kritik", color: "#e90128", icon: AlertOctagon },
 };
 
-// Not: renkler Badge'in `${color}NN` hex-alfa birleştirmesiyle kullanıldığından
+// Renkler Badge'in `${color}NN` hex-alfa birleştirmesiyle kullanıldığından
 // literal hex olmalı (bkz. SEVERITY_CONFIG notu). Değerler merkezi status
 // paletiyle eşleşir; "action_pending" da in_review ile aynı attention/neutral
 // tonunu paylaşır (gerçek ayrım icon+etiketle sağlanır — 3 status hue'suna

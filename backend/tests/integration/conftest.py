@@ -16,9 +16,11 @@ import app.core.oidc as oidc_module
 from app.core.config import get_settings
 from app.db.session import SessionLocal
 from app.main import app
-from app.models.enums import ReportFormat, ReportStatus, ReportType
+from app.models.authorization import UserRoleAssignment, UserScopeAssignment
+from app.models.enums import ReportFormat, ReportStatus, ReportType, Role, ScopeType
 from app.models.report import ReportExport
 from app.models.user import AuditLog
+from app.services.authz_admin import assign_role
 
 TEST_SUBJECT = "test-integration-subject"
 TEST_KID = "test-key-1"
@@ -164,3 +166,43 @@ def report_export_factory(db_session):
 @pytest.fixture
 def auth_headers():
     return {"Authorization": f"Bearer {make_test_token()}"}
+
+
+@pytest.fixture
+def role_assignment_factory(db_session):
+    """Bir subject'e rol + scope atar; teardown'da o test içinde atanan tüm subject'lerin
+    rol/scope kayıtlarını temizler. Aynı subject için tekrar çağrılması (ör. RBAC testlerinin
+    `_default_role_assignment`'ı override etmesi) idempotent upsert'tür — birikmez."""
+    created_subjects: set[str] = set()
+
+    def factory(
+        *,
+        subject: str = TEST_SUBJECT,
+        role: Role = Role.OPERATIONS_MANAGER,
+        scope_type: ScopeType = ScopeType.ALL,
+        factory_id=None,
+        plant_ids=None,
+    ) -> None:
+        assign_role(
+            db_session, subject, role, scope_type=scope_type, factory_id=factory_id, plant_ids=plant_ids,
+            actor="test-fixture",
+        )
+        db_session.commit()
+        created_subjects.add(subject)
+
+    yield factory
+
+    db_session.rollback()
+    if created_subjects:
+        db_session.execute(delete(UserScopeAssignment).where(UserScopeAssignment.subject.in_(created_subjects)))
+        db_session.execute(delete(UserRoleAssignment).where(UserRoleAssignment.subject.in_(created_subjects)))
+        db_session.commit()
+
+
+@pytest.fixture(autouse=True)
+def _default_role_assignment(role_assignment_factory):
+    """RBAC eklenmeden önce yazılmış tüm entegrasyon testlerinin `TEST_SUBJECT` ile hâlâ tam
+    erişime sahip olmasını sağlayan varsayılan — testler `role_assignment_factory`'i kendi
+    içinde tekrar çağırarak (aynı subject'i farklı rol/scope ile) bu varsayılanın üzerine
+    yazabilir."""
+    role_assignment_factory(subject=TEST_SUBJECT, role=Role.OPERATIONS_MANAGER, scope_type=ScopeType.ALL)

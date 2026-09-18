@@ -2,9 +2,12 @@
 
 ## Git Akışı (Git Flow)
 
-Repository branch/PR/approval politikasını enforce eden bir CI tanımı içermez.
-Ekip, kısa ömürlü feature branch ve kontrollü review yaklaşımını kurumsal Git
-politikasına göre uygulamalıdır.
+`.github/workflows/` altında backend/frontend lint+test CI'ı ve statik
+güvenlik taraması vardır (bkz. [07-testing.md](07-testing.md)), ancak bunun
+PR merge'ini fiilen bloklaması GitHub *Branch protection*'da required status
+check seçilmesine bağlıdır — repository kendi başına branch/approval
+politikasını enforce etmez. Ekip, kısa ömürlü feature branch ve kontrollü
+review yaklaşımını kurumsal Git politikasına göre uygulamalıdır.
 
 Bir değişikliğin minimum doğrulama akışı:
 

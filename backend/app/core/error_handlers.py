@@ -7,11 +7,15 @@ from fastapi import FastAPI, Request, status
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
 from pydantic.alias_generators import to_camel
+from sqlalchemy.exc import TimeoutError as SATimeoutError
 from starlette.exceptions import HTTPException as StarletteHTTPException
 
 from app.core import clock
+from app.core.config import get_settings
 from app.core.errors import ApiException
 from app.core.request_id import get_request_id
+from app.core.security_headers import apply_baseline_security_headers
+from app.db.session import engine as db_engine
 from app.schemas.base import ApiError, ErrorEnvelope
 
 logger = logging.getLogger("app.errors")
@@ -41,7 +45,9 @@ def _error_response(
             details=details,
         )
     )
-    return JSONResponse(status_code=status_code, content=envelope.model_dump(mode="json", by_alias=True))
+    response = JSONResponse(status_code=status_code, content=envelope.model_dump(mode="json", by_alias=True))
+    apply_baseline_security_headers(response.headers, environment=get_settings().environment)
+    return response
 
 
 def _validation_error_details(exc: RequestValidationError) -> dict[str, Any]:
@@ -78,9 +84,35 @@ def register_exception_handlers(app: FastAPI) -> None:
             message = "Kaynak bulunamadı."
         return _error_response(request, status_code=exc.status_code, code=code, message=message)
 
+    @app.exception_handler(SATimeoutError)
+    async def handle_db_pool_timeout(request: Request, exc: SATimeoutError) -> JSONResponse:
+        # SQLAlchemy pool_timeout süresinde boş/overflow bağlantı bulunamazsa fırlatılır.
+        # Genel 500 yerine ayrık 503 + kod, kapasite sorununu uygulama hatasından ayırt
+        # eder. Credential veya connection string loglanmaz; yalnızca pool durumu.
+        pool = db_engine.pool
+        logger.warning(
+            "DB connection pool exhausted for %s %s (checked_out=%s, pool_size=%s, overflow=%s)",
+            request.method,
+            request.url.path,
+            pool.checkedout(),
+            pool.size(),
+            pool.overflow(),
+            extra={"subject": getattr(request.state, "subject", None), "status_code": 503},
+        )
+        return _error_response(
+            request, status_code=503, code="DB_POOL_EXHAUSTED",
+            message="Sistem şu anda yoğun; lütfen kısa süre sonra tekrar deneyin.",
+        )
+
     @app.exception_handler(Exception)
     async def handle_unexpected_exception(request: Request, exc: Exception) -> JSONResponse:
-        logger.exception("Unhandled exception while processing %s %s", request.method, request.url.path, exc_info=exc)
+        logger.exception(
+            "Unhandled exception while processing %s %s",
+            request.method,
+            request.url.path,
+            exc_info=exc,
+            extra={"subject": getattr(request.state, "subject", None), "status_code": 500},
+        )
         return _error_response(
             request, status_code=500, code="INTERNAL_ERROR", message="Beklenmeyen bir hata oluştu.",
         )

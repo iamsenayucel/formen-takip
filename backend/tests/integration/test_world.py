@@ -97,10 +97,9 @@ class TestKpiSeriesConsistency:
 
 
 class TestCompareShiftsNumericParity:
-    """4B-2A2 karakterizasyonu: `world.compare_shifts` çıktısını plant_average dahil kilitler.
-
-    Investigation HTTP contract yalnız per_shift kullanır; compare_shifts LLM tool ise
-    plant_average değerini sunar. Test güncel seed'e bağlıdır.
+    """`world.compare_shifts` çıktısını plant_average dahil kilitler. Investigation HTTP
+    contract yalnız per_shift kullanır; compare_shifts LLM tool ise plant_average değerini
+    sunar. Test güncel seed'e bağlıdır.
     """
 
     def _by_code(self, db_session, code: str) -> Anomaly:
@@ -231,7 +230,7 @@ def _make_candidate(
 
 
 class TestSimilarHistoricalCasesScoringParity:
-    """4B-2C karakterizasyonu: Scoring formülünün her dalını çalıştıran çok adaylı fixture:
+    """Scoring formülünün her dalını çalıştıran çok adaylı fixture:
 
         kpi match:            +2
         anomaly_type match:   +2

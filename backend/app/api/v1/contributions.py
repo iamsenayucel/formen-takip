@@ -4,8 +4,10 @@ from uuid import UUID
 from fastapi import APIRouter, Depends, Query, Request, Response
 from sqlalchemy.orm import Session
 
-from app.api.deps import get_current_identity
+from app.api.authz_deps import assert_plant_ids_in_scope, require_permission
+from app.core.client_ip import get_client_ip
 from app.core.pagination import cursor_envelope
+from app.core.permissions import Permission
 from app.core.rate_limit import rate_limit_pdf
 from app.db.session import get_db
 from app.models.enums import (
@@ -14,7 +16,7 @@ from app.models.enums import (
     FinancialGainStatus,
     ImpactLevel,
 )
-from app.schemas.auth import Identity
+from app.schemas.authz import AuthContext
 from app.schemas.base import ApiResponse, CursorResponse
 from app.schemas.common import CursorParams, cursor_params
 from app.schemas.contribution import (
@@ -28,9 +30,19 @@ from app.services.contribution_work_service import ContributionWorkService
 
 router = APIRouter(prefix="/contribution-works", tags=["contribution-works"])
 
+_require_intelligence = require_permission(Permission.OPERATIONAL_INTELLIGENCE_VIEW)
+_require_contribute = require_permission(Permission.OPERATIONAL_IMPACT_CONTRIBUTE)
 
-def _client_ip(request: Request) -> str | None:
-    return request.client.host if request.client else None
+
+def _scope_plant_ids(ctx: AuthContext) -> list[UUID] | None:
+    return sorted(ctx.plant_ids, key=str) if ctx.plant_ids is not None else None
+
+
+def _assert_work_in_scope(service: ContributionWorkService, ctx: AuthContext, work_id: UUID) -> None:
+    if ctx.plant_ids is None:
+        return
+    plant_ids = service.repository.plant_ids_for_work(work_id)
+    assert_plant_ids_in_scope(ctx, plant_ids)
 
 
 @router.get("", response_model=CursorResponse[ContributionWorkItem])
@@ -49,7 +61,7 @@ def list_contribution_works(
     sort_dir: str = Query("desc", pattern="^(asc|desc)$"),
     page: CursorParams = Depends(cursor_params),
     db: Session = Depends(get_db),
-    _=Depends(get_current_identity),
+    ctx: AuthContext = Depends(_require_intelligence),
 ) -> CursorResponse[ContributionWorkItem]:
     service = ContributionWorkService(db)
     result = service.list_works(
@@ -57,6 +69,7 @@ def list_contribution_works(
         foreman_ids=foreman_ids, work_type=work_type, status=status_filter, impact_level=impact_level,
         financial_gain_status=financial_gain_status, search=search,
         sort_by=sort_by, sort_dir=sort_dir, page=page,
+        scope_plant_ids=_scope_plant_ids(ctx),
     )
     return cursor_envelope(result)
 
@@ -74,13 +87,14 @@ def contribution_summary(
     financial_gain_status: FinancialGainStatus | None = Query(None),
     search: str | None = Query(None),
     db: Session = Depends(get_db),
-    _=Depends(get_current_identity),
+    ctx: AuthContext = Depends(_require_intelligence),
 ) -> ApiResponse[ContributionSummary]:
     service = ContributionWorkService(db)
     data = service.summary(
         date_from=date_from, date_to=date_to, plant_ids=plant_ids, factory_ids=factory_ids,
         foreman_ids=foreman_ids, work_type=work_type, status=status_filter, impact_level=impact_level,
         financial_gain_status=financial_gain_status, search=search,
+        scope_plant_ids=_scope_plant_ids(ctx),
     )
     return {"data": data}
 
@@ -90,18 +104,22 @@ def create_contribution_work(
     payload: ContributionWorkCreate,
     request: Request,
     db: Session = Depends(get_db),
-    current_user: Identity = Depends(get_current_identity),
+    ctx: AuthContext = Depends(_require_contribute),
 ) -> ApiResponse[ContributionWorkItem]:
+    assert_plant_ids_in_scope(ctx, payload.plant_ids)
     service = ContributionWorkService(db)
     data = service.create(
-        payload, subject=current_user.subject, ip_address=_client_ip(request), record_audit=record_audit
+        payload, subject=ctx.subject, ip_address=get_client_ip(request), record_audit=record_audit
     )
     return {"data": data}
 
 
 @router.get("/{work_id}", response_model=ApiResponse[ContributionWorkItem])
-def get_contribution_work(work_id: UUID, db: Session = Depends(get_db), _=Depends(get_current_identity)) -> ApiResponse[ContributionWorkItem]:
+def get_contribution_work(
+    work_id: UUID, db: Session = Depends(get_db), ctx: AuthContext = Depends(_require_intelligence)
+) -> ApiResponse[ContributionWorkItem]:
     service = ContributionWorkService(db)
+    _assert_work_in_scope(service, ctx, work_id)
     return {"data": service.get(work_id)}
 
 
@@ -111,11 +129,14 @@ def update_contribution_work(
     payload: ContributionWorkUpdate,
     request: Request,
     db: Session = Depends(get_db),
-    current_user: Identity = Depends(get_current_identity),
+    ctx: AuthContext = Depends(_require_contribute),
 ) -> ApiResponse[ContributionWorkItem]:
     service = ContributionWorkService(db)
+    _assert_work_in_scope(service, ctx, work_id)
+    if payload.plant_ids is not None:
+        assert_plant_ids_in_scope(ctx, payload.plant_ids)
     data = service.update(
-        work_id, payload, subject=current_user.subject, ip_address=_client_ip(request), record_audit=record_audit
+        work_id, payload, subject=ctx.subject, ip_address=get_client_ip(request), record_audit=record_audit
     )
     return {"data": data}
 
@@ -125,18 +146,20 @@ def delete_contribution_work(
     work_id: UUID,
     request: Request,
     db: Session = Depends(get_db),
-    current_user: Identity = Depends(get_current_identity),
+    ctx: AuthContext = Depends(_require_contribute),
 ) -> Response:
     service = ContributionWorkService(db)
-    service.delete(work_id, subject=current_user.subject, ip_address=_client_ip(request), record_audit=record_audit)
+    _assert_work_in_scope(service, ctx, work_id)
+    service.delete(work_id, subject=ctx.subject, ip_address=get_client_ip(request), record_audit=record_audit)
     return Response(status_code=204)
 
 
 @router.get("/{work_id}/pdf", dependencies=[Depends(rate_limit_pdf)])
 def download_contribution_work_pdf(
-    work_id: UUID, db: Session = Depends(get_db), current_user: Identity = Depends(get_current_identity)
+    work_id: UUID, db: Session = Depends(get_db), ctx: AuthContext = Depends(_require_intelligence)
 ) -> Response:
     service = ContributionWorkService(db)
+    _assert_work_in_scope(service, ctx, work_id)
     pdf_bytes, file_name = service.pdf(work_id)
     return Response(
         content=pdf_bytes, media_type="application/pdf",

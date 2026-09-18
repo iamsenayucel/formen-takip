@@ -4,12 +4,14 @@ from uuid import UUID
 from fastapi import APIRouter, Depends, Query
 from sqlalchemy.orm import Session
 
-from app.api.deps import get_current_identity
+from app.api.authz_deps import assert_plant_in_scope, require_permission
 from app.core import clock
 from app.core.errors import InvalidMonthParameterError, ShiftAnalysisNotFoundError
+from app.core.permissions import Permission
 from app.db.session import get_db
+from app.schemas.authz import AuthContext
 from app.schemas.base import ApiResponse
-from app.schemas.common import parse_uuid_list
+from app.schemas.common import narrow_ids, parse_uuid_list
 from app.schemas.shift_analysis import (
     ShiftAnalysisCardsResponse,
     ShiftAnomalyDetail,
@@ -18,6 +20,8 @@ from app.schemas.shift_analysis import (
 from app.services import shift_analysis
 
 router = APIRouter(prefix="/shift-analysis", tags=["shift-analysis"])
+
+_require_intelligence = require_permission(Permission.OPERATIONAL_INTELLIGENCE_VIEW)
 
 
 def _resolve_period(month: str | None) -> tuple[date, date]:
@@ -98,8 +102,20 @@ def _summary_to_dict(summary: shift_analysis.ShiftAnomalySummary) -> dict:
     }
 
 
+def _apply_scope(filters: dict, ctx: AuthContext) -> dict:
+    """`plant_ids`/`factory_ids`'i authorization scope'u ile daraltır — `narrow_filters`
+    ile aynı kural: scope kısıtlıysa `factory_ids` yok sayılır, tek eksen `plant_ids`'tir."""
+    if ctx.plant_ids is None:
+        return filters
+    return {**filters, "plant_ids": narrow_ids(filters["plant_ids"], ctx.plant_ids), "factory_ids": None}
+
+
 @router.get("/cards", response_model=ApiResponse[ShiftAnalysisCardsResponse])
-def get_cards(filters: dict = Depends(_cards_filters), db: Session = Depends(get_db), _=Depends(get_current_identity)) -> ApiResponse[ShiftAnalysisCardsResponse]:
+def get_cards(
+    filters: dict = Depends(_cards_filters), db: Session = Depends(get_db),
+    ctx: AuthContext = Depends(_require_intelligence),
+) -> ApiResponse[ShiftAnalysisCardsResponse]:
+    filters = _apply_scope(filters, ctx)
     month_start, month_end = _resolve_period(filters["month"])
     cards = shift_analysis.build_cards(
         db, month_start, month_end,
@@ -141,7 +157,11 @@ def _heatmap_cell_to_dict(cell: shift_analysis.HeatmapCell) -> dict:
 
 
 @router.get("/heatmap", response_model=ApiResponse[ShiftHeatmapResponse])
-def get_heatmap(filters: dict = Depends(_heatmap_filters), db: Session = Depends(get_db), _=Depends(get_current_identity)) -> ApiResponse[ShiftHeatmapResponse]:
+def get_heatmap(
+    filters: dict = Depends(_heatmap_filters), db: Session = Depends(get_db),
+    ctx: AuthContext = Depends(_require_intelligence),
+) -> ApiResponse[ShiftHeatmapResponse]:
+    filters = _apply_scope(filters, ctx)
     month_start, month_end = _resolve_period(filters["month"])
     plant_refs, kpi_refs, cells, ordered_shifts = shift_analysis.build_heatmap(
         db, month_start, month_end,
@@ -178,8 +198,9 @@ def get_heatmap(filters: dict = Depends(_heatmap_filters), db: Session = Depends
 def get_detail(
     plant_id: UUID = Query(...), shift_id: UUID = Query(...), kpi_id: UUID = Query(...),
     month: str | None = Query(None, description="YYYY-MM — belirtilmezse bir önce tamamlanan ay kullanılır"),
-    db: Session = Depends(get_db), _=Depends(get_current_identity),
+    db: Session = Depends(get_db), ctx: AuthContext = Depends(_require_intelligence),
 ) -> ApiResponse[ShiftAnomalyDetail]:
+    assert_plant_in_scope(ctx, plant_id)
     month_start, month_end = _resolve_period(month)
     detail = shift_analysis.build_detail(
         db, plant_id=plant_id, shift_id=shift_id, kpi_id=kpi_id, month_start=month_start, month_end=month_end,

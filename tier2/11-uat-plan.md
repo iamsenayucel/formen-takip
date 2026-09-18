@@ -11,10 +11,10 @@
 - **IT/DevOps:** OIDC, PostgreSQL, storage, SMTP, DNS/TLS, scheduler,
   health/readiness ve secret/env yapılandırmasını kabul eder.
 
-Bu personalar current kullanım senaryolarıdır; backend role/permission scope'u
-değildir. Fine-grained RBAC deferred olduğundan tüm doğrulanmış kullanıcılar
-aynı endpoint yüzeyine erişir. Rol/tesis bazlı izolasyon bu release'in UAT
-kabul kriteri değildir.
+Backend fine-grained RBAC uygulanmıştır — üç rol (Formen/Şef/Operasyon
+Yöneticisi), sabit permission paketi ve ALL/FACTORY/PLANT veri kapsamı (bkz.
+[06-security.md](06-security.md)). Rol/tesis bazlı izolasyon **bu release'in
+UAT kabul kriteridir** (bkz. senaryo 19 aşağıda).
 
 ## Senaryolar
 
@@ -70,6 +70,15 @@ kabul kriteri değildir.
     production PostgreSQL backup/restore, private S3/CloudFront, SMTP relay,
     DNS/TLS/firewall ve secret yönetimi IT ile ortam üzerinde test edilmelidir.
     Bu provizyonlar repository içinden tamamlanmış varsayılmaz.
+19. **RBAC (rol/scope):** Rol atanmamış subject tüm korumalı endpoint'lerden
+    `403` almalıdır. Formen yalnızca Genel Bakış+Performans'ı görmeli; Şef
+    ayrıca Operasyonel Zekâ ve Operational Impact+ katkısına erişmeli;
+    Operasyon Yöneticisi ayrıca Çıktılar/Raporlar'a erişmelidir (bkz. rol→
+    permission tablosu, [06-security.md](06-security.md)). Scope dışı bir
+    tesis/şef/formen kaydına ID ile erişim `403` dönmeli, liste/filtre
+    uçlarında ise sessizce daraltılmalıdır. Bu senaryo gerçek kurumsal SSO
+    rolleri/grup eşlemesiyle ayrıca kabul edilmelidir — `AUTH_BYPASS`
+    tabanlı yerel doğrulama bunun yerine geçmez.
 
 UAT'ta kullanılan development dataset sentetiktir. Production master data ve
 eski sentetik dump uyumluluğu aynı kabul kriteri değildir; gerçek veri yükleme

@@ -1,0 +1,109 @@
+name: backend-ci
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+  workflow_dispatch: {}
+
+# Yeni bir push aynı PR/branch için eskisini iptal eder — kuyrukta biriken
+# gereksiz Testcontainers/Postgres çalıştırmalarını önler.
+concurrency:
+  group: backend-ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  lint:
+    name: ruff (backend)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: "3.11"
+          cache: "pip"
+          cache-dependency-path: backend/requirements-dev.txt
+      - name: Install dev dependencies
+        working-directory: backend
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements-dev.txt
+      - name: Run ruff (dar kapsam — bkz. backend/pyproject.toml)
+        working-directory: backend
+        run: python -m ruff check app tests
+
+  test:
+    name: pytest (full suite)
+    runs-on: ubuntu-latest
+    # Integration testleri tests/integration/_ephemeral_db.py üzerinden Testcontainers
+    # ile kendi Postgres container'ını başlatır — ubuntu-latest runner'ın önceden
+    # kurulu Docker daemon'ı bunun için yeterlidir, ek Docker-in-Docker kurulumu yok.
+    timeout-minutes: 60
+    env:
+      # Job-level'da açıkça sabitlenir ki host/CI ortamından sızabilecek uyumsuz
+      # bir değer (ör. DEBUG=release) Pydantic Settings'i bozmasın. DATABASE_URL /
+      # POSTGRES_* burada BİLEREK tanımlanmaz: tests/integration/_ephemeral_db.py
+      # DATABASE_URL'i yalnızca kendi başlattığı geçici container'a göre, ilk
+      # app.* import'undan önce ayarlar — kalıcı/app DB'ye fallback imkânsız hale
+      # gelsin diye burada gerçek bir DATABASE_URL asla verilmez.
+      ENVIRONMENT: test
+      DEBUG: "false"
+      AUTH_BYPASS: "false"
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: "3.11"
+          cache: "pip"
+          cache-dependency-path: backend/requirements-dev.txt
+      - name: Install dependencies
+        working-directory: backend
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements-dev.txt
+      - name: Run full pytest suite
+        working-directory: backend
+        # Varsayılan (belirtilmemiş) shell `bash -e` kullanır, pipefail YOK —
+        # `pytest | tee` bu durumda pytest'in exit code'unu maskeler ve kırmızı
+        # bir suite'i yeşil gösterebilirdi. PIPESTATUS pipefail'den bağımsız
+        # çalıştığından gerçek exit code buradan güvenle okunur, canlı log akışı
+        # (`tee`) da korunur. `--junitxml`, collection sayısını (aşağıdaki sanity
+        # check) stdout formatından bağımsız, deterministik bir kaynaktan okumak
+        # için üretilir — pytest'in tek bir çalıştırması, ek maliyet yok.
+        run: |
+          python -m pytest -q --durations=15 --junitxml=pytest-results.xml 2>&1 | tee pytest-output.log
+          echo "PYTEST_EXIT_CODE=${PIPESTATUS[0]}" >> "$GITHUB_ENV"
+      - name: Collected test count sanity check
+        if: always()
+        working-directory: backend
+        run: |
+          # NOT: `pytest -q` stdout'u "collected N item" satırını hiç basmaz (yalnızca
+          # -v/-vv modunda veya bir collection hatasında görünür) — bunu grep'lemek
+          # COLLECTED'i sessizce 0'a düşürüp testler geçse bile sanity check'i kırardı.
+          # Bunun yerine yukarıdaki adımın ürettiği JUnit XML'in kök <testsuite>
+          # elemanındaki tests="N" niteliği okunur: pytest'in kendi topladığı gerçek
+          # test sayısı, stdout formatından bağımsız.
+          COLLECTED=$(grep -oE '<testsuite[^>]*\stests="[0-9]+"' pytest-results.xml | head -1 | grep -oE 'tests="[0-9]+"' | grep -oE '[0-9]+' || echo 0)
+          SUMMARY_LINE=$(tail -5 pytest-output.log | grep -E "passed|failed|error" | tail -1 || true)
+          {
+            echo "### Pytest sonucu"
+            echo '```'
+            echo "collected: ${COLLECTED:-0} test(s) (JUnit XML tests= niteliğinden)"
+            echo "$SUMMARY_LINE"
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+          echo "Collected ${COLLECTED:-0} test(s); summary: $SUMMARY_LINE"
+          # Sabit bir hedef sayı (ör. 998) yerine yalnızca "collection tamamen
+          # kırıldı mı" sınıfındaki felaket senaryosunu yakalayan kaba bir taban —
+          # test sayısı zamanla değiştikçe bu eşik kırılgan bir gate olmasın diye.
+          if [ "${COLLECTED:-0}" -lt 100 ]; then
+            echo "::error::Collected test count (${COLLECTED:-0}) is implausibly low — suite may have failed to collect."
+            exit 1
+          fi
+          if [ "${PYTEST_EXIT_CODE:-1}" != "0" ]; then
+            echo "::error::pytest exited with code ${PYTEST_EXIT_CODE}."
+            exit 1
+          fi
